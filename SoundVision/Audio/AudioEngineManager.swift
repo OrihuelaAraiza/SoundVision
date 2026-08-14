@@ -7,15 +7,43 @@ import Foundation
 final class AudioEngineManager {
     private let engine = AVAudioEngine()
     private var players: [SoundNodeType: AVAudioPlayerNode] = [:]
+    private var pitchUnits: [SoundNodeType: AVAudioUnitTimePitch] = [:]
+    private var reverbUnits: [SoundNodeType: AVAudioUnitReverb] = [:]
+    private var delayUnits: [SoundNodeType: AVAudioUnitDelay] = [:]
+    private var distortionUnits: [SoundNodeType: AVAudioUnitDistortion] = [:]
     private var buffers: [SoundNodeType: AVAudioPCMBuffer] = [:]
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
 
     init() {
         for type in SoundNodeType.allCases {
             let player = AVAudioPlayerNode()
+            let pitch = AVAudioUnitTimePitch()
+            let distortion = AVAudioUnitDistortion()
+            let reverb = AVAudioUnitReverb()
+            let delay = AVAudioUnitDelay()
+
+            distortion.loadFactoryPreset(.speechWaves)
+            distortion.wetDryMix = 0
+            reverb.loadFactoryPreset(.mediumHall)
+            reverb.wetDryMix = 0
+            delay.wetDryMix = 0
+            delay.feedback = 28
+
             players[type] = player
+            pitchUnits[type] = pitch
+            distortionUnits[type] = distortion
+            reverbUnits[type] = reverb
+            delayUnits[type] = delay
             engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: format)
+            engine.attach(pitch)
+            engine.attach(distortion)
+            engine.attach(reverb)
+            engine.attach(delay)
+            engine.connect(player, to: pitch, format: format)
+            engine.connect(pitch, to: distortion, format: format)
+            engine.connect(distortion, to: reverb, format: format)
+            engine.connect(reverb, to: delay, format: format)
+            engine.connect(delay, to: engine.mainMixerNode, format: format)
             buffers[type] = Self.makeBuffer(for: type, format: format)
         }
     }
@@ -24,6 +52,11 @@ final class AudioEngineManager {
         guard let player = players[node.type], let buffer = buffers[node.type] else { return }
         startEngineIfNeeded()
         player.volume = max(0, min(node.volume, 1))
+        pitchUnits[node.type]?.pitch = max(-2_400, min(node.pitch * 100, 2_400))
+        reverbUnits[node.type]?.wetDryMix = max(0, min(node.reverb * 65, 65))
+        delayUnits[node.type]?.wetDryMix = max(0, min(node.delay * 58, 58))
+        delayUnits[node.type]?.delayTime = TimeInterval(0.06 + node.delay * 0.55)
+        distortionUnits[node.type]?.wetDryMix = max(0, min(node.distortion * 52, 52))
         player.stop()
         player.scheduleBuffer(buffer, at: nil, options: .interrupts)
         player.play()

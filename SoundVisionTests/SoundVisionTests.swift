@@ -15,9 +15,28 @@ final class SoundVisionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: folder) }
 
         let storage = CompositionStorage(customURL: url)
-        let composition = Composition(title: "Test", bpm: 108, steps: 16, nodes: SoundNode.starterPattern())
+        let nodes = SoundNode.starterPattern()
+        let connection = SoundConnection(sourceNodeID: nil, destinationNodeID: nodes[0].id, durationBeats: 1.5)
+        let composition = Composition(title: "Test", bpm: 108, steps: 16, nodes: nodes, connections: [connection])
         try storage.save(composition)
         XCTAssertEqual(try storage.load(), composition)
+    }
+
+    func testSpatialMappingUsesEveryAxis() {
+        XCTAssertGreaterThan(SpatialParameterMapper.pitch(forHeight: 1.8), 0)
+        XCTAssertLessThan(SpatialParameterMapper.pitch(forHeight: 0.7), 0)
+        XCTAssertGreaterThan(SpatialParameterMapper.volume(forDepth: 0.8), SpatialParameterMapper.volume(forDepth: -0.8))
+
+        let near = SpatialParameterMapper.durationBeats(from: [0, 1.25, 0], to: [0.25, 2, 0])
+        let far = SpatialParameterMapper.durationBeats(from: [0, 1.25, 0], to: [1.5, 0.4, 0])
+        XCTAssertGreaterThan(far, near)
+    }
+
+    func testRotationMapsToIndependentEffects() {
+        let effects = SpatialParameterMapper.effects(from: [.pi / 2, .pi / 4, .pi])
+        XCTAssertEqual(effects.reverb, 0.5, accuracy: 0.001)
+        XCTAssertEqual(effects.delay, 0.25, accuracy: 0.001)
+        XCTAssertEqual(effects.distortion, 1, accuracy: 0.001)
     }
 
     @MainActor

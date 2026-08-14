@@ -1,18 +1,19 @@
 # SoundVision
 
 **Surgery of Sound** es un prototipo nativo para Apple Vision Pro que convierte
-un secuenciador musical en una escultura 3D interactiva.
+una composición musical en un grafo 3D interactivo.
 
 ## Prototipo actual
 
 - Ventana SwiftUI y `ImmersiveSpace` mixto.
-- Aro de 16 pasos y ocho nodos RealityKit diferenciados por forma y color.
-- Activación por tap/pinch, play/pausa, BPM de 70 a 160 y pulso visual.
+- Núcleo Play desde el que se extraen y conectan organismos sonoros.
+- Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
+- Conexiones dirigidas libres con reproducción visual del grafo.
 - Ocho timbres sintetizados localmente con `AVAudioEngine` (sin assets externos).
 - Guardado y carga de la composición como JSON local.
 - Pruebas unitarias para el patrón, timing y persistencia.
 - Identidad visual modular generada por código: nodos compuestos, núcleo
-  reactivo, conexiones, ondas e interpolación del pulso.
+  reactivo, conexiones y ondas.
 
 La dirección artística y sus decisiones están documentadas en
 [`VISUAL_IDENTITY.md`](VISUAL_IDENTITY.md).

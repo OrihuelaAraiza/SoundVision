@@ -1,46 +1,52 @@
-# Identidad visual de SoundVision
+# Identidad espacial de SoundVision
 
-La escena sigue una idea simple: cada sonido es un organismo y la mezcla es su
-centro de energía. Toda la identidad se genera con primitivas de RealityKit,
-materiales y comportamiento; no usa modelos ni texturas externas.
+SoundVision no representa una canción como línea de tiempo: la representa como
+un grafo musical tridimensional. Cada sonido es un organismo, las conexiones
+definen el recorrido de reproducción y la geometría funciona como partitura.
 
-## Lenguaje visual
+## Gramática espacial
 
-- **Estructura:** aro instrumental de 16 pasos con marcas principales en 0, 4,
-  8 y 12, conectado a un núcleo de mezcla multicapa.
-- **Jerarquía:** el aro y las conexiones usan tonos fríos y baja opacidad; los
-  colores de instrumentos aparecen solo como acentos.
-- **Estado:** un nodo inactivo pierde saturación, brillo, tamaño, conexión e
-  idle. Un nodo activo recupera su color y movimiento.
-- **Trigger:** el disparo produce flash, cambio de escala, onda expansiva,
-  refuerzo de la conexión y respuesta del núcleo.
-- **Selección:** una envolvente tenue identifica el nodo recién manipulado sin
-  añadir un panel 3D dominante.
+| Transformación | Parámetro musical |
+|---|---|
+| Distancia horizontal entre nodos | Duración antes de continuar por el grafo |
+| Altura | Pitch, de grave a agudo |
+| Profundidad respecto al usuario | Volumen, de lejano a cercano |
+| Rotación X | Reverb |
+| Rotación Y | Delay |
+| Rotación Z | Distorsión |
 
-## Personalidades
+Los rangos se centralizan en `SpatialParameterMapper`, de modo que puedan
+calibrarse después de probarlos físicamente sin modificar gestos ni audio.
 
-| Nodo | Geometría | Movimiento |
-|---|---|---|
-| Kick | Esfera pesada y disco inferior | Impacto corto y amplio |
-| Snare | Núcleo angular y placas laterales | Apertura seca |
-| Hi-hat | Dos discos delgados | Cierre rápido y flotación ágil |
-| Clap | Dos placas y punto de contacto | Las placas chocan al sonar |
-| Bass | Prisma con corazón interior | Respiración lenta y pesada |
-| Pad | Dos esferas translúcidas | Deriva ambiental amplia |
-| Lead | Cristal vertical y haz central | Oscilación direccional |
-| FX | Núcleo inclinado con fragmentos | Rotación irregular |
+## Flujo de composición
+
+1. La experiencia comienza con un único núcleo **Play**.
+2. Arrastrar desde el núcleo extrae un nuevo organismo sonoro. Existe también
+   un botón de respaldo para simulador y accesibilidad.
+3. El nodo nace conectado al origen y se puede mover o rotar libremente.
+4. Seleccionar **Conectar** en un nodo y después tocar otro crea una conexión
+   dirigida adicional.
+5. Play recorre el grafo desde el núcleo. Los ciclos se visitan una vez por
+   sesión para evitar reproducción infinita accidental.
+
+## Respuesta visual
+
+- El hover privado de visionOS resalta automáticamente el objeto observado sin
+  exponer a la app datos crudos de eye tracking.
+- Un pinch selecciona el nodo y abre su inspector musical.
+- El nodo que emite sonido brilla, escala y genera una onda.
+- Su conexión se ilumina y el núcleo responde a la actividad total.
+- Los nodos inactivos pierden saturación, movimiento y conexión visible.
 
 ## Arquitectura
 
-- `SoundVisionMaterials`: paleta y familias de materiales.
-- `NodeVisualStyle`: parámetros cinéticos por tipo de sonido.
-- `NodeEntityFactory`: jerarquías geométricas e interacción.
-- `NodeAnimationSystem`: estado, idle y personalidad en ejecución.
-- `SequencerRing` y `PulseIndicator`: lectura temporal.
-- `WaveformVisualizer`: onda breve de cada trigger.
-- `ConnectionLineSystem`: relación informativa nodo-núcleo.
-- `CentralCoreSystem`: representación reactiva de la mezcla.
+- `SoundVisionMaterials` y `NodeVisualStyle`: lenguaje visual.
+- `NodeEntityFactory` y `NodeAnimationSystem`: organismos e interacción.
+- `TransportNodeFactory`: origen Play del grafo.
+- `ConnectionLineSystem`: conexiones dirigidas dinámicas.
+- `SpatialParameterMapper`: traducción geometría-sonido.
+- `GraphTransport`: recorrido musical y prevención de ciclos.
+- `AudioEngineManager`: pitch, reverb, delay y distorsión con AVAudioEngine.
 
-El siguiente paso visual debe basarse en pruebas dentro del visor: revisar
-distancias, transparencia, contraste, comodidad y carga gráfica antes de añadir
-partículas o shaders más complejos.
+La siguiente calibración debe hacerse en Vision Pro: sensibilidad del drag,
+rangos cómodos de altura/profundidad, legibilidad del inspector y carga gráfica.

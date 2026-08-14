@@ -29,7 +29,7 @@ struct MainWindowView: View {
                     Text("Surgery of Sound")
                         .font(.title2.weight(.medium))
                         .foregroundStyle(.cyan)
-                    Text("Convierte una secuencia musical en una escultura interactiva.")
+                    Text("Construye música conectando organismos sonoros en el espacio.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                 }
@@ -57,8 +57,8 @@ struct MainWindowView: View {
 
                 HStack(spacing: 32) {
                     metric(title: "TEMPO", value: "\(Int(state.sequencer.bpm)) BPM")
-                    metric(title: "PASOS", value: "16")
-                    metric(title: "NODOS ACTIVOS", value: "\(state.nodes.filter(\.isActive).count) / 8")
+                    metric(title: "NODOS", value: "\(state.nodes.count)")
+                    metric(title: "CONEXIONES", value: "\(state.connections.count)")
                 }
 
                 if let message = state.statusMessage {
@@ -87,7 +87,7 @@ struct MainWindowView: View {
         if state.isImmersiveSpaceOpen {
             await dismissImmersiveSpace()
             state.isImmersiveSpaceOpen = false
-            state.sequencer.stop()
+            state.graphTransport.stop()
         } else {
             switch await openImmersiveSpace(id: ImmersiveSpaceID.soundLab) {
             case .opened:
