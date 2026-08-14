@@ -8,10 +8,13 @@ una composición musical en un grafo 3D interactivo.
 - Ventana SwiftUI y `ImmersiveSpace` mixto.
 - Núcleo Play desde el que se extraen y conectan organismos sonoros.
 - Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
-- Conexiones dirigidas libres con reproducción visual del grafo.
-- Ocho timbres sintetizados localmente con `AVAudioEngine` (sin assets externos).
+- Conexiones dirigidas libres con bifurcaciones simultáneas y loops acotados.
+- Scheduling sample-accurate mediante generadores mono a 48 kHz.
+- RealityKit Spatial Audio por nodo: HRTF personalizado, seguimiento espacial,
+  acústica ambiental y atenuación de distancia administrados por Apple.
+- Ocho timbres sintetizados localmente (sin assets externos).
 - Guardado y carga de la composición como JSON local.
-- Pruebas unitarias para el patrón, timing y persistencia.
+- Pruebas unitarias para el patrón, timing, bifurcaciones, ciclos y persistencia.
 - Identidad visual modular generada por código: nodos compuestos, núcleo
   reactivo, conexiones y ondas.
 

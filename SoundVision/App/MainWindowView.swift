@@ -87,7 +87,7 @@ struct MainWindowView: View {
         if state.isImmersiveSpaceOpen {
             await dismissImmersiveSpace()
             state.isImmersiveSpaceOpen = false
-            state.graphTransport.stop()
+            state.stopPlayback()
         } else {
             switch await openImmersiveSpace(id: ImmersiveSpaceID.soundLab) {
             case .opened:

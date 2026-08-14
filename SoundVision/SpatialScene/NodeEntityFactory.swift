@@ -1,5 +1,6 @@
 import Foundation
 import RealityKit
+import UIKit
 
 enum NodeEntityFactory {
     static let nodePrefix = "sound-node-"
@@ -19,7 +20,17 @@ enum NodeEntityFactory {
 
         root.addChild(WaveformVisualizer.makeWave(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
+        root.addChild(makeSpatialReadout(for: node))
         return root
+    }
+
+    static func updateSpatialReadout(in root: Entity, node: SoundNode) {
+        let expectedName = readoutName(for: node)
+        guard root.findEntity(named: expectedName) == nil else { return }
+        for child in root.children where child.name.hasPrefix("node-readout-") {
+            child.removeFromParent()
+        }
+        root.addChild(makeSpatialReadout(for: node))
     }
 
     private static func visualParts(for type: SoundNodeType, surface: RealityKit.Material) -> [ModelEntity] {
@@ -84,6 +95,41 @@ enum NodeEntityFactory {
         )
         halo.isEnabled = false
         return halo
+    }
+
+    /// Etiqueta espacial deliberadamente breve. visionOS aplica el hover sin
+    /// revelar a la app qué estaba mirando la persona; el inspector detallado
+    /// continúa abriéndose con pinch.
+    private static func makeSpatialReadout(for node: SoundNode) -> Entity {
+        let container = Entity()
+        container.name = readoutName(for: node)
+        container.position = [-0.16, 0.27, 0.02]
+
+        let text = String(
+            format: "%@   %+.0f st   %d%%",
+            node.name,
+            node.pitch,
+            Int(node.volume * 100)
+        )
+        let mesh = MeshResource.generateText(
+            text,
+            extrusionDepth: 0.0008,
+            font: .monospacedSystemFont(ofSize: 0.034, weight: .semibold),
+            containerFrame: CGRect(x: 0, y: 0, width: 0.5, height: 0.07),
+            alignment: .left,
+            lineBreakMode: .byClipping
+        )
+        let label = ModelEntity(
+            mesh: mesh,
+            materials: [UnlitMaterial(color: UIColor.white.withAlphaComponent(0.72))]
+        )
+        label.name = "spatial-readout-label"
+        container.addChild(label)
+        return container
+    }
+
+    private static func readoutName(for node: SoundNode) -> String {
+        "node-readout-\(Int(node.pitch.rounded()))-\(Int((node.volume * 100).rounded()))-\(node.isActive)"
     }
 
     static func id(from entity: Entity) -> UUID? {

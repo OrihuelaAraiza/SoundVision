@@ -5,6 +5,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXFileReference section */
+		A40000000000000000000001 /* SoundVision.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SoundVision.app; sourceTree = BUILT_PRODUCTS_DIR;};
+		A40000000000000000000002 /* SoundVisionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SoundVisionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
+/* End PBXFileReference section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000001 /* SoundVision */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;

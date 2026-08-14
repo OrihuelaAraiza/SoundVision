@@ -13,12 +13,12 @@ final class CompositionState: ObservableObject {
     @Published var selectedNodeID: UUID?
     @Published var pendingConnectionSourceID: UUID?
     @Published var statusMessage: String?
+    @Published var spatialAudioSession: SpatialAudioSession?
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
-    private let audio = AudioEngineManager()
     private let storage: CompositionStorage
-    private var pulseClearTask: Task<Void, Never>?
+    private var pulseClearTasks: [UUID: Task<Void, Never>] = [:]
     private var observations = Set<AnyCancellable>()
 
     init(storage: CompositionStorage = CompositionStorage()) {
@@ -119,9 +119,41 @@ final class CompositionState: ObservableObject {
     }
 
     func togglePlayback() {
-        graphTransport.toggle(nodes: nodes, connections: connections, bpm: sequencer.bpm) { [weak self] node in
-            self?.trigger(node)
+        if graphTransport.isPlaying {
+            stopPlayback()
+            return
         }
+
+        let nodesByID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        graphTransport.start(
+            nodes: nodes,
+            connections: connections,
+            bpm: sequencer.bpm,
+            onSchedule: { [weak self] timeline, secondsPerBeat in
+                guard let self else { return nil }
+                let session = SpatialAudioSession(
+                    nodes: Array(nodesByID.values),
+                    events: timeline,
+                    secondsPerBeat: secondsPerBeat
+                )
+                self.spatialAudioSession = session
+                return session.leadInSeconds
+            },
+            onVisualTrigger: { [weak self] node in
+                self?.triggerVisualPulse(for: node.id)
+            },
+            onCompletion: { [weak self] in
+                self?.spatialAudioSession = nil
+            }
+        )
+    }
+
+    func stopPlayback() {
+        graphTransport.stop()
+        spatialAudioSession = nil
+        pulseClearTasks.values.forEach { $0.cancel() }
+        pulseClearTasks = [:]
+        lastTriggeredNodeIDs = []
     }
 
     func save() {
@@ -136,7 +168,7 @@ final class CompositionState: ObservableObject {
     func load() {
         do {
             let composition = try storage.load()
-            graphTransport.stop()
+            stopPlayback()
             sequencer.bpm = composition.bpm
             nodes = composition.nodes
             connections = composition.connections.isEmpty
@@ -152,8 +184,7 @@ final class CompositionState: ObservableObject {
     }
 
     func reset() {
-        graphTransport.stop()
-        audio.stopAll()
+        stopPlayback()
         nodes = []
         connections = []
         lastTriggeredNodeIDs = []
@@ -166,15 +197,14 @@ final class CompositionState: ObservableObject {
         Composition(title: "Anatomía del Sonido", bpm: sequencer.bpm, steps: Sequencer.totalSteps, nodes: nodes, connections: connections)
     }
 
-    private func trigger(_ node: SoundNode) {
-        lastTriggeredNodeIDs = [node.id]
-        audio.play(node)
-
-        pulseClearTask?.cancel()
-        pulseClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 220_000_000)
+    private func triggerVisualPulse(for nodeID: UUID) {
+        lastTriggeredNodeIDs.insert(nodeID)
+        pulseClearTasks[nodeID]?.cancel()
+        pulseClearTasks[nodeID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
-            self?.lastTriggeredNodeIDs = []
+            self?.lastTriggeredNodeIDs.remove(nodeID)
+            self?.pulseClearTasks[nodeID] = nil
         }
     }
 

@@ -26,13 +26,17 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
 3. El nodo nace conectado al origen y se puede mover o rotar libremente.
 4. Seleccionar **Conectar** en un nodo y después tocar otro crea una conexión
    dirigida adicional.
-5. Play recorre el grafo desde el núcleo. Los ciclos se visitan una vez por
-   sesión para evitar reproducción infinita accidental.
+5. Play agenda el grafo completo contra el reloj de audio. Todas las conexiones
+   salientes se reproducen simultáneamente y sus voces se mezclan.
+6. Los ciclos son musicales: el control **Loops** permite entre una y ocho
+   vueltas por conexión, con un límite global de seguridad para grafos grandes.
 
 ## Respuesta visual
 
 - El hover privado de visionOS resalta automáticamente el objeto observado sin
   exponer a la app datos crudos de eye tracking.
+- Cada nodo muestra un readout espacial breve con nombre, pitch y volumen; la
+  mirada lo enfatiza junto al organismo sin convertirse en estado observable.
 - Un pinch selecciona el nodo y abre su inspector musical.
 - El nodo que emite sonido brilla, escala y genera una onda.
 - Su conexión se ilumina y el núcleo responde a la actividad total.
@@ -45,8 +49,19 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
 - `TransportNodeFactory`: origen Play del grafo.
 - `ConnectionLineSystem`: conexiones dirigidas dinámicas.
 - `SpatialParameterMapper`: traducción geometría-sonido.
-- `GraphTransport`: recorrido musical y prevención de ciclos.
-- `AudioEngineManager`: pitch, reverb, delay y distorsión con AVAudioEngine.
+- `GraphTransport`: timeline concurrente, bifurcaciones y loops acotados.
+- `AudioEngineManager`: fuentes RealityKit Spatial Audio ligadas a las entidades,
+  generadores mono a 48 kHz y scheduling compartido por host time.
+
+## Campo sonoro
+
+- Cada organismo es también una fuente acústica 3D en su posición visual real.
+- RealityKit resuelve HRTF personalizado, movimiento de cabeza, distancia y
+  respuesta acústica del entorno.
+- Pitch se sintetiza directamente a la frecuencia solicitada; delay y
+  distorsión se procesan en el generador, y reverb usa el envío espacial nativo.
+- Todas las fuentes parten de una señal mono para evitar artefactos antes de la
+  espacialización, siguiendo la recomendación de Apple.
 
 La siguiente calibración debe hacerse en Vision Pro: sensibilidad del drag,
 rangos cómodos de altura/profundidad, legibilidad del inspector y carga gráfica.

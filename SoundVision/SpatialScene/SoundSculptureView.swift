@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SoundSculptureView: View {
     @EnvironmentObject private var state: CompositionState
+    @StateObject private var audioEngine = AudioEngineManager()
     @State private var spatialRequest: SpatialRequest?
     @State private var processedSpawnToken: UUID?
 
@@ -15,6 +16,7 @@ struct SoundSculptureView: View {
                 guard let root = content.entities.first(where: { $0.name == "sound-sculpture" }) else { return }
                 processSpatialRequest(using: content, root: root)
                 reconcileNodes(in: root)
+                audioEngine.synchronize(session: state.spatialAudioSession, in: root)
                 updateScene(root, at: timeline.date.timeIntervalSinceReferenceDate)
             }
             .gesture(tapGesture)
@@ -27,6 +29,7 @@ struct SoundSculptureView: View {
                 inspectorPanel.padding(.trailing, 28)
             }
         }
+        .onDisappear { audioEngine.stopAll() }
     }
 
     private var tapGesture: some Gesture {
@@ -105,6 +108,19 @@ struct SoundSculptureView: View {
 
             Text("\(Int(state.sequencer.bpm)) BPM")
                 .font(.caption.monospacedDigit())
+
+            Stepper(
+                "Loops \(state.graphTransport.loopPasses)×",
+                value: Binding(
+                    get: { state.graphTransport.loopPasses },
+                    set: { state.graphTransport.loopPasses = $0 }
+                ),
+                in: 1...8
+            )
+            .font(.caption.monospacedDigit())
+            .frame(width: 116)
+            .disabled(state.graphTransport.isPlaying)
+            .help("Máximo de recorridos por conexión cíclica")
 
             Button { state.save() } label: { Image(systemName: "square.and.arrow.down") }
             Button { state.reset() } label: { Image(systemName: "arrow.counterclockwise") }
@@ -198,10 +214,7 @@ struct SoundSculptureView: View {
     }
 
     private func updateScene(_ root: Entity, at time: TimeInterval) {
-        var soundingIDs = state.lastTriggeredNodeIDs
-        if let currentNodeID = state.graphTransport.currentNodeID {
-            soundingIDs.insert(currentNodeID)
-        }
+        let soundingIDs = state.lastTriggeredNodeIDs.union(state.graphTransport.activeNodeIDs)
         ConnectionLineSystem.synchronize(
             in: root,
             nodes: state.nodes,
@@ -222,6 +235,7 @@ struct SoundSculptureView: View {
 
         for node in state.nodes {
             guard let entity = root.findEntity(named: NodeEntityFactory.nodePrefix + node.id.uuidString) else { continue }
+            NodeEntityFactory.updateSpatialReadout(in: entity, node: node)
             NodeAnimationSystem.update(
                 entity,
                 node: node,

@@ -39,6 +39,46 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertEqual(effects.distortion, 1, accuracy: 0.001)
     }
 
+    func testGraphScheduleStartsBranchesAtTheSameBeat() {
+        let source = SoundNode(name: "Source", type: .kick, positionX: 0, positionY: 1.25, positionZ: 0)
+        let branchA = SoundNode(name: "A", type: .bass, positionX: 1, positionY: 1.25, positionZ: 0)
+        let branchB = SoundNode(name: "B", type: .pad, positionX: -1, positionY: 1.25, positionZ: 0)
+        let connections = [
+            SoundConnection(sourceNodeID: nil, destinationNodeID: source.id),
+            SoundConnection(sourceNodeID: source.id, destinationNodeID: branchA.id, durationBeats: 1.5),
+            SoundConnection(sourceNodeID: source.id, destinationNodeID: branchB.id, durationBeats: 1.5)
+        ]
+
+        let schedule = GraphTransport.makeSchedule(
+            nodes: [source, branchA, branchB],
+            connections: connections,
+            loopPasses: 1
+        )
+
+        XCTAssertEqual(schedule.first, GraphPlaybackEvent(nodeID: source.id, beat: 0))
+        XCTAssertEqual(Set(schedule.dropFirst().map(\.beat)), [1.5])
+        XCTAssertEqual(Set(schedule.dropFirst().map(\.nodeID)), [branchA.id, branchB.id])
+    }
+
+    func testGraphScheduleBoundsIntentionalCycle() {
+        let nodeA = SoundNode(name: "A", type: .lead, positionX: 0, positionY: 1.25, positionZ: 0)
+        let nodeB = SoundNode(name: "B", type: .fx, positionX: 1, positionY: 1.25, positionZ: 0)
+        let connections = [
+            SoundConnection(sourceNodeID: nil, destinationNodeID: nodeA.id),
+            SoundConnection(sourceNodeID: nodeA.id, destinationNodeID: nodeB.id, durationBeats: 1),
+            SoundConnection(sourceNodeID: nodeB.id, destinationNodeID: nodeA.id, durationBeats: 1)
+        ]
+
+        let schedule = GraphTransport.makeSchedule(
+            nodes: [nodeA, nodeB],
+            connections: connections,
+            loopPasses: 2
+        )
+
+        XCTAssertEqual(schedule.map(\.beat), [0, 1, 2, 3, 4])
+        XCTAssertEqual(schedule.map(\.nodeID), [nodeA.id, nodeB.id, nodeA.id, nodeB.id, nodeA.id])
+    }
+
     @MainActor
     func testSequencerStepDurationAt120BPM() {
         let sequencer = Sequencer()
