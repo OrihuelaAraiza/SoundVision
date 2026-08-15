@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SoundSculptureView: View {
     @EnvironmentObject private var state: CompositionState
+    @Environment(\.openWindow) private var openWindow
     @StateObject private var audioEngine = AudioEngineManager()
     @State private var spatialRequest: SpatialRequest?
     @State private var processedSpawnToken: UUID?
@@ -11,25 +12,38 @@ struct SoundSculptureView: View {
     @State private var isShowingNewTrackConfirmation = false
     @State private var isShowingDemoConfirmation = false
     @State private var isInstrumentDrawerExpanded = true
+    @State private var transportPanelOffset = CGSize.zero
+    @State private var drawerPanelOffset = CGSize.zero
+    @State private var inspectorPanelOffset = CGSize.zero
+    @State private var guidePanelOffset = CGSize.zero
+    @State private var panelDistance: Float = 0.72
+    @State private var isChangingComposition = false
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(
-                .animation(
-                    minimumInterval: state.graphTransport.isPlaying ? 1.0 / 20.0 : 1.0 / 12.0,
-                    paused: state.nodes.isEmpty
-                )
-            ) { timeline in
-                RealityView { content in
+            TimelineView(.animation(
+                minimumInterval: state.graphTransport.isPlaying ? 1.0 / 20.0 : (state.nodes.isEmpty ? 0.25 : 1.0 / 12.0),
+                paused: false
+            )) { timeline in
+                RealityView { content, attachments in
                     let sculpture = makeSculpture()
                     content.add(sculpture)
+                    installPanelAttachments(in: content, attachments: attachments)
                     await ParticleEffectSystem.prepareAssets(in: sculpture)
-                } update: { content in
+                } update: { content, _ in
                     guard let root = content.entities.first(where: { $0.name == "sound-sculpture" }) else { return }
                     processSpatialRequest(using: content, root: root)
-                    reconcileNodes(in: root)
+                    // Detén las fuentes antes de retirar las entidades que las contienen.
                     audioEngine.synchronize(session: state.spatialAudioSession, in: root)
+                    reconcileNodes(in: root)
                     updateScene(root, at: timeline.date.timeIntervalSinceReferenceDate)
+                    updatePanelAttachmentPositions(in: content)
+                } attachments: {
+                    Attachment(id: PanelAttachmentID.transport) { transportPanel }
+                    Attachment(id: PanelAttachmentID.drawer) { instrumentDrawer }
+                    Attachment(id: PanelAttachmentID.inspector) { inspectorPanel }
+                    Attachment(id: PanelAttachmentID.guide) { testGuide }
+                    Attachment(id: PanelAttachmentID.status) { statusBanner }
                 }
                 .dropDestination(for: String.self) { items, location in
                     guard let rawType = items.first,
@@ -40,21 +54,6 @@ struct SoundSculptureView: View {
                 .gesture(tapGesture)
                 .simultaneousGesture(dragGesture)
                 .simultaneousGesture(rotationGesture)
-            }
-            .overlay(alignment: .bottom) {
-                transportPanel.padding(.bottom, 24)
-            }
-            .overlay(alignment: .trailing) {
-                inspectorPanel.padding(.trailing, 24)
-            }
-            .overlay(alignment: .leading) {
-                instrumentDrawer.padding(.leading, 24)
-            }
-            .overlay(alignment: .topLeading) {
-                testGuide.padding(.top, 24).padding(.leading, 24)
-            }
-            .overlay(alignment: .top) {
-                statusBanner.padding(.top, 24)
             }
         }
         .onDisappear { audioEngine.stopAll() }
@@ -132,6 +131,8 @@ struct SoundSculptureView: View {
     private var transportPanel: some View {
         VStack(spacing: 10) {
             HStack(spacing: 14) {
+                MenuDragHandle(label: "Mover controles", offset: $transportPanelOffset)
+
                 Button { state.togglePlayback() } label: {
                     Label(
                         state.graphTransport.isPlaying ? "Detener" : "Reproducir",
@@ -140,7 +141,7 @@ struct SoundSculptureView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(state.graphTransport.isPlaying ? .pink : .cyan)
-                .disabled(state.connections.isEmpty)
+                .disabled(state.connections.isEmpty || isChangingComposition)
 
                 Button { isInstrumentDrawerExpanded.toggle() } label: {
                     Label("Sonidos", systemImage: "square.grid.2x2.fill")
@@ -150,10 +151,12 @@ struct SoundSculptureView: View {
                     Label("Demo espacial", systemImage: "ear.and.waveform")
                 }
                 .tint(.purple)
+                .disabled(isChangingComposition)
 
                 Button { requestNewTrack() } label: {
                     Label("Nueva pista", systemImage: "doc.badge.plus")
                 }
+                .disabled(isChangingComposition)
 
                 Divider().frame(height: 28)
 
@@ -196,9 +199,47 @@ struct SoundSculptureView: View {
                 .disabled(state.graphTransport.isPlaying)
                 .help("Máximo de recorridos por conexión cíclica")
 
-                Spacer(minLength: 10)
+                Spacer()
+            }
+
+            HStack(spacing: 12) {
+                Text("MENÚS")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+
+                Button { adjustPanelDistance(by: -0.08) } label: {
+                    Label("Más cerca", systemImage: "plus.magnifyingglass")
+                }
+                .help("Acerca todos los menús")
+
+                Button { adjustPanelDistance(by: 0.08) } label: {
+                    Label("Más lejos", systemImage: "minus.magnifyingglass")
+                }
+                .help("Aleja todos los menús")
+
+                Button { resetMenuPositions() } label: {
+                    Label("Recentrar", systemImage: "scope")
+                }
+                .accessibilityLabel("Recentrar menús")
+                .help("Devuelve todos los paneles a su posición inicial")
+
+                Button { openWindow(id: StudioWindowID.controls) } label: {
+                    Label("Ventana movible", systemImage: "macwindow.on.rectangle")
+                }
+                .accessibilityLabel("Abrir controles movibles")
+                .help("Abre una ventana espacial que puedes acomodar con la barra del sistema")
+
+                Spacer()
                 Button { state.save() } label: { Label("Guardar", systemImage: "square.and.arrow.down") }
-                Button { state.reset() } label: { Label("Limpiar", systemImage: "arrow.counterclockwise") }
+                Button {
+                    performCompositionTransition {
+                        state.reset()
+                        isInstrumentDrawerExpanded = true
+                    }
+                } label: {
+                    Label("Limpiar", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(isChangingComposition)
             }
         }
         .padding(.horizontal, 18)
@@ -216,11 +257,12 @@ struct SoundSculptureView: View {
                         Text("CAJÓN DE SONIDOS")
                             .font(.caption.weight(.bold))
                             .tracking(1.5)
-                        Text("Toca para añadir · arrastra para colocar")
+                        Text("Toca/arrastra sonidos · usa MOVER para acomodar")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    MenuDragHandle(label: "Mover cajón", offset: $drawerPanelOffset)
                     Button { isInstrumentDrawerExpanded = false } label: {
                         Image(systemName: "chevron.left.circle.fill")
                     }
@@ -243,12 +285,17 @@ struct SoundSculptureView: View {
             .frame(width: 286)
             .glassBackgroundEffect(in: .rect(cornerRadius: 22))
         } else {
-            Button { isInstrumentDrawerExpanded = true } label: {
-                Label("Sonidos", systemImage: "square.grid.2x2.fill")
-                    .padding(.vertical, 8)
+            HStack(spacing: 8) {
+                MenuDragHandle(label: "Mover cajón", offset: $drawerPanelOffset)
+                Button { isInstrumentDrawerExpanded = true } label: {
+                    Label("Sonidos", systemImage: "square.grid.2x2.fill")
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyan)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.cyan)
+            .padding(8)
+            .glassBackgroundEffect(in: .capsule)
         }
     }
 
@@ -284,6 +331,7 @@ struct SoundSculptureView: View {
         if let node = state.selectedNode {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
+                    MenuDragHandle(label: "Mover inspector", offset: $inspectorPanelOffset)
                     Circle()
                         .fill(Color(uiColor: NodeVisualStyle.style(for: node.type).color))
                         .frame(width: 10, height: 10)
@@ -345,6 +393,7 @@ struct SoundSculptureView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.purple)
                     Spacer()
+                    MenuDragHandle(label: "Mover guía", offset: $guidePanelOffset)
                     Text("\(state.testStep + 1)/\(CompositionState.spatialTestInstructions.count)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -375,7 +424,13 @@ struct SoundSculptureView: View {
 
     @ViewBuilder
     private var statusBanner: some View {
-        if let message = state.statusMessage {
+        if isChangingComposition {
+            Label("Actualizando el espacio…", systemImage: "waveform.path")
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .glassBackgroundEffect(in: .capsule)
+        } else if let message = state.statusMessage {
             Text(message)
                 .font(.footnote.weight(.medium))
                 .padding(.horizontal, 16)
@@ -401,6 +456,7 @@ struct SoundSculptureView: View {
         root.addChild(ConnectionLineSystem.makeContainer())
         root.addChild(TransportNodeFactory.make())
         state.nodes.forEach { root.addChild(NodeEntityFactory.makeNode($0)) }
+        root.components.set(SceneMembershipRevisionComponent(value: state.sceneContentRevision))
         return root
     }
 
@@ -426,8 +482,10 @@ struct SoundSculptureView: View {
     }
 
     private func startNewTrack() {
-        state.startNewComposition()
-        isInstrumentDrawerExpanded = true
+        performCompositionTransition {
+            state.startNewComposition()
+            isInstrumentDrawerExpanded = true
+        }
     }
 
     private func requestDemo() {
@@ -439,8 +497,82 @@ struct SoundSculptureView: View {
     }
 
     private func loadDemo() {
-        state.loadSpatialTestScene()
-        isInstrumentDrawerExpanded = false
+        performCompositionTransition {
+            state.loadSpatialTestScene()
+            isInstrumentDrawerExpanded = false
+        }
+    }
+
+    private func performCompositionTransition(_ update: @escaping @MainActor () -> Void) {
+        guard !isChangingComposition else { return }
+        isChangingComposition = true
+        audioEngine.stopAll()
+        state.stopPlayback()
+
+        Task { @MainActor in
+            // Cede un frame para retirar audio y mostrar feedback antes de
+            // reemplazar de una sola vez las entidades del grafo.
+            await Task.yield()
+            update()
+            await Task.yield()
+            isChangingComposition = false
+        }
+    }
+
+    private func resetMenuPositions() {
+        withAnimation(.snappy(duration: 0.32)) {
+            transportPanelOffset = .zero
+            drawerPanelOffset = .zero
+            inspectorPanelOffset = .zero
+            guidePanelOffset = .zero
+            panelDistance = 0.72
+        }
+        state.statusMessage = "Menús recentrados y listos para acomodarse de nuevo."
+    }
+
+    private func adjustPanelDistance(by delta: Float) {
+        withAnimation(.snappy(duration: 0.2)) {
+            panelDistance = min(0.95, max(0.52, panelDistance + delta))
+        }
+        state.statusMessage = String(format: "Menús a %.0f cm.", panelDistance * 100)
+    }
+
+    private func installPanelAttachments(
+        in content: RealityViewContent,
+        attachments: RealityViewAttachments
+    ) {
+        let headAnchor = AnchorEntity(.head, trackingMode: .continuous)
+        headAnchor.name = PanelAttachmentID.headAnchor
+
+        for id in PanelAttachmentID.all {
+            guard let entity = attachments.entity(for: id) else { continue }
+            entity.name = id
+            headAnchor.addChild(entity)
+        }
+        content.add(headAnchor)
+        updatePanelAttachmentPositions(in: content)
+    }
+
+    private func updatePanelAttachmentPositions(in content: RealityViewContent) {
+        guard let anchor = content.entities.first(where: { $0.name == PanelAttachmentID.headAnchor }) else { return }
+        setPanelPosition(PanelAttachmentID.transport, base: [0, -0.31], offset: transportPanelOffset, in: anchor)
+        setPanelPosition(PanelAttachmentID.drawer, base: [-0.40, 0.01], offset: drawerPanelOffset, in: anchor)
+        setPanelPosition(PanelAttachmentID.inspector, base: [0.40, 0.01], offset: inspectorPanelOffset, in: anchor)
+        setPanelPosition(PanelAttachmentID.guide, base: [0, 0.29], offset: guidePanelOffset, in: anchor)
+        anchor.findEntity(named: PanelAttachmentID.status)?.position = [0, 0.42, -panelDistance]
+    }
+
+    private func setPanelPosition(
+        _ name: String,
+        base: SIMD2<Float>,
+        offset: CGSize,
+        in anchor: Entity
+    ) {
+        anchor.findEntity(named: name)?.position = [
+            base.x + Float(offset.width) / 1_000,
+            base.y - Float(offset.height) / 1_000,
+            -panelDistance
+        ]
     }
 
     private func instrumentName(for type: SoundNodeType) -> String {
@@ -487,13 +619,16 @@ struct SoundSculptureView: View {
     }
 
     private func reconcileNodes(in root: Entity) {
+        guard root.components[SceneMembershipRevisionComponent.self]?.value != state.sceneContentRevision else { return }
         let expectedNames = Set(state.nodes.map { NodeEntityFactory.nodePrefix + $0.id.uuidString })
         for stale in root.children where stale.name.hasPrefix(NodeEntityFactory.nodePrefix) && !expectedNames.contains(stale.name) {
+            stale.isEnabled = false
             stale.removeFromParent()
         }
         for node in state.nodes where root.findEntity(named: NodeEntityFactory.nodePrefix + node.id.uuidString) == nil {
             root.addChild(NodeEntityFactory.makeNode(node))
         }
+        root.components.set(SceneMembershipRevisionComponent(value: state.sceneContentRevision))
     }
 
     private func updateScene(_ root: Entity, at time: TimeInterval) {
@@ -539,6 +674,60 @@ struct SoundSculptureView: View {
             )
         }
     }
+}
+
+private struct MenuDragHandle: View {
+    let label: String
+    @Binding var offset: CGSize
+    @State private var origin: CGSize?
+
+    var body: some View {
+        Label("MOVER", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(.thinMaterial, in: .capsule)
+            .contentShape(.capsule)
+            .hoverEffect()
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let start = origin ?? offset
+                        if origin == nil { origin = start }
+                        offset = Self.clamped(
+                            CGSize(
+                                width: start.width + value.translation.width,
+                                height: start.height + value.translation.height
+                            )
+                        )
+                    }
+                    .onEnded { _ in origin = nil }
+            )
+            .accessibilityLabel(label)
+            .accessibilityHint("Mantén el pinch y mueve la mano para acomodar el panel")
+    }
+
+    private static func clamped(_ value: CGSize) -> CGSize {
+        CGSize(
+            width: min(360, max(-360, value.width)),
+            height: min(220, max(-220, value.height))
+        )
+    }
+}
+
+private enum PanelAttachmentID {
+    static let headAnchor = "studio-panels-head-anchor"
+    static let transport = "studio-panel-transport"
+    static let drawer = "studio-panel-drawer"
+    static let inspector = "studio-panel-inspector"
+    static let guide = "studio-panel-guide"
+    static let status = "studio-panel-status"
+    static let all = [transport, drawer, inspector, guide, status]
+}
+
+private struct SceneMembershipRevisionComponent: Component {
+    var value: Int
 }
 
 private enum SpatialRequest {

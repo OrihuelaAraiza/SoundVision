@@ -20,6 +20,11 @@ una composición musical en un grafo 3D interactivo.
 - Partículas RealityKit con atlas original animado, ligadas a selección y audio.
 - Cajón de ocho instrumentos: toque para añadir o drag & drop para colocar.
 - Flujo explícito para alternar entre **Demo espacial** y **Nueva pista**.
+- Paneles RealityKit a distancia cómoda, anclados a la cabeza para permanecer
+  visibles, con asas independientes, ajuste **Más cerca / Más lejos** y
+  recuperación mediante **Recentrar menús**.
+- Ventana de **Controles movibles** que puede recolocarse físicamente con la
+  barra de ventana de visionOS cuando el usuario cambia de orientación.
 
 La dirección artística y sus decisiones están documentadas en
 [`VISUAL_IDENTITY.md`](VISUAL_IDENTITY.md).
@@ -44,6 +49,16 @@ del espacio inmersivo.
 Para componer desde cero, pulsa **Nueva pista**. El cajón **Sonidos** aparece a
 la izquierda: toca un instrumento para añadirlo en una posición segura o
 arrástralo y suéltalo sobre el lienzo para decidir su posición inicial.
+
+Cada panel tiene una zona visible **MOVER**. Mantén el pinch sobre ella y mueve
+la mano para acomodarlo. Usa **Más cerca / Más lejos** para ajustar la distancia
+del conjunto o el icono de mira para recuperar la distribución inicial.
+
+Si aun así algún panel queda fuera del campo de visión, pulsa **Controles movibles**
+desde la ventana principal o el icono de ventana en la barra de transporte.
+Después toma la barra inferior que proporciona visionOS y coloca la ventana
+frente a ti. Desde ahí puedes reproducir, cambiar de modo, añadir sonidos y
+operar el nodo seleccionado.
 
 El simulador valida la escena y la interacción básica. La percepción espacial,
 ergonomía, audio y comodidad deben validarse también en un Apple Vision Pro real.

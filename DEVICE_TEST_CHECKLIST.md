@@ -22,8 +22,22 @@
 4. Arrastra `Pad` desde el cajón y suéltalo arriba a la derecha; debe aparecer
    cerca del punto de caída y conectado automáticamente con Play.
 5. Vuelve a **Demo espacial** y después a **Nueva pista** desde la barra inferior.
+6. Gira 90° y confirma que los paneles permanecen frente a ti a una distancia
+   cómoda, sin quedarse en el lugar donde comenzó la experiencia.
+7. Mantén el pinch sobre **MOVER** y acomoda cajón, controles, inspector y guía
+   por separado.
+8. Prueba **Más cerca** y **Más lejos**; el conjunto debe cambiar de distancia
+   sin saltos ni bloquear los botones.
+9. Pulsa el icono de mira **Recentrar menús** y confirma que todos vuelven a su lugar.
+10. Pulsa el icono de ventana **Controles movibles**, gira el cuerpo o la cabeza y
+   recoloca esa ventana frente a ti usando la barra inferior de visionOS.
+11. Desde la ventana flotante añade un nodo, reproduce y detén. Confirma que las
+   acciones también se reflejan inmediatamente en la escena inmersiva.
+12. Alterna diez veces entre **Demo espacial** y **Nueva pista**. Cada cambio debe
+    completar sin conservar nodos viejos, congelar controles ni dejar audio activo.
 
-Registra: altura cómoda, claridad de los controles y cualquier drop que no cree un nodo.
+Registra: altura cómoda, claridad de los controles, cualquier drop que no cree
+un nodo y cualquier panel que pueda salirse del rango recuperable.
 
 ### 1. Localización inicial
 
@@ -80,6 +94,7 @@ La prueba es satisfactoria si:
 - el audio permanece anclado al mover la cabeza;
 - Play/Stop puede repetirse sin silencio, duplicación ni sonidos residuales;
 - pinch, drag y rotación funcionan sin selecciones accidentales frecuentes;
+- los menús pueden moverse, recentrarse y recuperarse con la ventana flotante;
 - brillo y ondas coinciden perceptualmente con cada ataque;
 - partículas no ocultan nodos, texto ni conexiones y el campo Metal permanece fluido;
 - no hay parpadeos, cintas colapsadas ni partículas cuadradas con borde visible;

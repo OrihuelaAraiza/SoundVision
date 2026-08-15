@@ -12,6 +12,12 @@ struct SoundVisionApp: App {
         .windowStyle(.plain)
         .defaultSize(width: 760, height: 620)
 
+        WindowGroup(id: StudioWindowID.controls) {
+            FloatingStudioControlsView()
+                .environmentObject(compositionState)
+        }
+        .defaultSize(width: 430, height: 590)
+
         ImmersiveSpace(id: ImmersiveSpaceID.soundLab) {
             SoundSculptureView()
                 .environmentObject(compositionState)
@@ -22,4 +28,8 @@ struct SoundVisionApp: App {
 
 enum ImmersiveSpaceID {
     static let soundLab = "sound-lab"
+}
+
+enum StudioWindowID {
+    static let controls = "soundvision-controls"
 }

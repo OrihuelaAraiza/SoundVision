@@ -4,6 +4,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var state: CompositionState
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.openWindow) private var openWindow
     @State private var isTransitioning = false
 
     var body: some View {
@@ -76,6 +77,15 @@ struct MainWindowView: View {
                     Label("Cargar composición guardada", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.plain)
+
+                if state.isImmersiveSpaceOpen {
+                    Button {
+                        openWindow(id: StudioWindowID.controls)
+                    } label: {
+                        Label("Abrir controles movibles", systemImage: "macwindow.on.rectangle")
+                    }
+                    .buttonStyle(.bordered)
+                }
 
                 Divider().opacity(0.35)
 

@@ -16,6 +16,7 @@ final class CompositionState: ObservableObject {
     @Published var spatialAudioSession: SpatialAudioSession?
     @Published var isSpatialTestScene = false
     @Published var testStep = 0
+    @Published private(set) var sceneContentRevision = 0
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
@@ -69,6 +70,7 @@ final class CompositionState: ObservableObject {
         connections.removeAll { $0.sourceNodeID == id || $0.destinationNodeID == id }
         selectedNodeID = nil
         pendingConnectionSourceID = nil
+        sceneContentRevision &+= 1
         statusMessage = "Nodo eliminado."
     }
 
@@ -124,6 +126,7 @@ final class CompositionState: ObservableObject {
         nodes.append(node)
         connect(sourceID: sourceID, destinationID: node.id)
         selectedNodeID = node.id
+        sceneContentRevision &+= 1
         statusMessage = "\(displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
         return node.id
     }
@@ -231,6 +234,7 @@ final class CompositionState: ObservableObject {
         pendingConnectionSourceID = nil
         isSpatialTestScene = true
         testStep = 0
+        sceneContentRevision &+= 1
         statusMessage = "Prueba lista: pulsa Play y localiza el FX detrás de ti."
     }
 
@@ -285,6 +289,7 @@ final class CompositionState: ObservableObject {
             selectedNodeID = nil
             pendingConnectionSourceID = nil
             recalculateAllConnections()
+            sceneContentRevision &+= 1
             statusMessage = "Composición espacial cargada."
             isSpatialTestScene = false
         } catch {
@@ -306,6 +311,7 @@ final class CompositionState: ObservableObject {
         statusMessage = message
         isSpatialTestScene = false
         testStep = 0
+        sceneContentRevision &+= 1
     }
 
     var snapshot: Composition {

@@ -102,10 +102,14 @@ final class SoundVisionTests: XCTestCase {
     @MainActor
     func testNewCompositionLeavesDemoAndSpecificInstrumentCanBeAdded() {
         let state = CompositionState()
+        let initialRevision = state.sceneContentRevision
         state.loadSpatialTestScene()
+        XCTAssertEqual(state.sceneContentRevision, initialRevision + 1)
 
         state.startNewComposition()
+        XCTAssertEqual(state.sceneContentRevision, initialRevision + 2)
         let id = state.createNode(of: .bass, at: [0.4, 1.4, 0])
+        XCTAssertEqual(state.sceneContentRevision, initialRevision + 3)
 
         XCTAssertFalse(state.isSpatialTestScene)
         XCTAssertEqual(state.nodes.count, 1)
