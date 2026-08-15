@@ -3,6 +3,7 @@ import RealityKit
 enum TransportNodeFactory {
     static let rootName = "transport-play-node"
 
+    @MainActor
     static func make() -> Entity {
         let root = Entity()
         root.name = rootName
@@ -11,6 +12,8 @@ enum TransportNodeFactory {
         let core = CentralCoreSystem.make()
         core.position = .zero
         root.addChild(core)
+
+        root.addChild(MetalEnergyFieldSystem.make())
 
         let playGlyph = ModelEntity(
             mesh: .generateCone(height: 0.12, radius: 0.075),

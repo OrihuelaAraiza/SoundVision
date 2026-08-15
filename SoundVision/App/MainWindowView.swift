@@ -36,22 +36,46 @@ struct MainWindowView: View {
 
                 HStack(spacing: 16) {
                     Button {
-                        Task { await toggleImmersiveSpace() }
+                        Task { await startNewTrack() }
                     } label: {
-                        Label(state.isImmersiveSpaceOpen ? "Cerrar laboratorio" : "Iniciar sesión", systemImage: state.isImmersiveSpaceOpen ? "xmark" : "visionpro")
-                            .frame(minWidth: 180)
+                        Label("Nueva pista", systemImage: "plus.rectangle.on.rectangle")
+                            .frame(minWidth: 190)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.cyan)
                     .disabled(isTransitioning)
 
                     Button {
-                        state.load()
+                        Task { await startSpatialTest() }
                     } label: {
-                        Label("Cargar composición", systemImage: "square.and.arrow.down")
+                        Label("Abrir demo", systemImage: "ear.and.waveform")
+                            .frame(minWidth: 180)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.purple)
+                    .disabled(isTransitioning)
+
+                    Button {
+                        Task { await toggleImmersiveSpace() }
+                    } label: {
+                        Label(
+                            state.isImmersiveSpaceOpen ? "Cerrar estudio" : "Entrar al estudio",
+                            systemImage: state.isImmersiveSpaceOpen ? "xmark" : "visionpro"
+                        )
                     }
                     .buttonStyle(.bordered)
+                    .disabled(isTransitioning)
                 }
+
+                Button {
+                    Task {
+                        state.load()
+                        await openStudioIfNeeded()
+                    }
+                } label: {
+                    Label("Cargar composición guardada", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.plain)
 
                 Divider().opacity(0.35)
 
@@ -77,6 +101,24 @@ struct MainWindowView: View {
             Text(title).font(.caption2.weight(.bold)).tracking(2).foregroundStyle(.secondary)
             Text(value).font(.title3.monospacedDigit().weight(.semibold))
         }
+    }
+
+    @MainActor
+    private func startSpatialTest() async {
+        state.loadSpatialTestScene()
+        await openStudioIfNeeded()
+    }
+
+    @MainActor
+    private func startNewTrack() async {
+        state.startNewComposition()
+        await openStudioIfNeeded()
+    }
+
+    @MainActor
+    private func openStudioIfNeeded() async {
+        guard !state.isImmersiveSpaceOpen else { return }
+        await toggleImmersiveSpace()
     }
 
     @MainActor

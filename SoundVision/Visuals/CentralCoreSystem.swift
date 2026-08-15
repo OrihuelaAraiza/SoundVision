@@ -27,6 +27,7 @@ enum CentralCoreSystem {
         )
         heart.name = "core-heart"
         root.addChild(heart)
+        root.addChild(ParticleEffectSystem.makeCoreEmitter())
         return root
     }
 
@@ -38,8 +39,16 @@ enum CentralCoreSystem {
 
         if let shell = core.findEntity(named: "core-shell") as? ModelEntity {
             shell.scale = SIMD3(repeating: 1 + activity * 0.12 + (triggeredCount > 0 ? 0.16 : 0))
-            shell.model?.materials = [SoundVisionMaterials.core(intensity: 0.5 + activity * 0.5)]
+            let materialBand = min(4, activeCount / 2) + (triggeredCount > 0 ? 10 : 0)
+            if core.components[CoreRenderedStateComponent.self]?.materialBand != materialBand {
+                shell.model?.materials = [SoundVisionMaterials.core(intensity: 0.5 + activity * 0.5)]
+                core.components.set(CoreRenderedStateComponent(materialBand: materialBand))
+            }
             shell.orientation = simd_quatf(angle: Float(time * 0.16), axis: [0.3, 1, 0.2])
         }
     }
+}
+
+private struct CoreRenderedStateComponent: Component {
+    var materialBand: Int
 }

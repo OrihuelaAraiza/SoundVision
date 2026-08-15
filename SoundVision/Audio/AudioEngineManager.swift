@@ -63,7 +63,9 @@ final class AudioEngineManager: ObservableObject {
                     configuration: AudioGeneratorConfiguration(layoutTag: kAudioChannelLayoutTag_Mono),
                     renderer.render
                 )
-                controller.gain = -3
+                // Conserva 6 dB de headroom para bifurcaciones simultáneas y
+                // evita que la primera prueba física resulte agresiva.
+                controller.gain = -6
                 controller.play()
                 controllers.append(controller)
                 renderers.append(renderer)
@@ -97,15 +99,12 @@ final class AudioEngineManager: ObservableObject {
 /// se evalúan contra host time, de modo que ramas distintas comparten ataques
 /// sample-accurate aunque cada entidad tenga su propio generador.
 private final class SpatialVoiceRenderer: @unchecked Sendable {
-    private let node: SoundNode
     private let attackSeconds: [TimeInterval]
     private let sampleRate = 48_000.0
     private let soundDuration: TimeInterval
-    private let baseFrequency: Double
-    private let seed: UInt64
+    private let samples: [Float]
 
     init(node: SoundNode, attackHostTimes: [UInt64]) {
-        self.node = node
         attackSeconds = attackHostTimes.map(AVAudioTime.seconds(forHostTime:))
         soundDuration = node.type == .pad || node.type == .fx ? 0.9 : 0.38
         let fundamental: Double = switch node.type {
@@ -118,8 +117,15 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         case .lead: 660
         case .fx: 310
         }
-        baseFrequency = fundamental * pow(2, Double(node.pitch) / 12)
-        seed = UInt64(node.type.rawValue.utf8.reduce(17) { $0 &* 31 &+ UInt64($1) })
+        let baseFrequency = fundamental * pow(2, Double(node.pitch) / 12)
+        let seed = UInt64(node.type.rawValue.utf8.reduce(17) { $0 &* 31 &+ UInt64($1) })
+        samples = Self.renderSamples(
+            node: node,
+            sampleRate: sampleRate,
+            duration: soundDuration,
+            baseFrequency: baseFrequency,
+            seed: seed
+        )
     }
 
     var render: Audio.GeneratorRenderHandler {
@@ -135,9 +141,10 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
                     for attack in attackSeconds {
                         let localTime = absoluteTime - attack
                         guard localTime >= 0, localTime < soundDuration else { continue }
-                        mixedSample += sample(at: localTime)
+                        let sampleIndex = min(samples.count - 1, Int(localTime * sampleRate))
+                        mixedSample += samples[sampleIndex]
                     }
-                    data[frame] = tanh(mixedSample * 1.15) * 0.78
+                    data[frame] = max(-0.78, min(mixedSample * 0.9, 0.78))
                 }
             }
 
@@ -145,25 +152,55 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         }
     }
 
-    private func sample(at time: TimeInterval) -> Float {
-        let dry = drySample(at: time)
-        let delayTime = 0.07 + Double(node.delay) * 0.48
-        let firstEcho = time >= delayTime ? drySample(at: time - delayTime) * node.delay * 0.42 : 0
-        let secondEcho = time >= delayTime * 2 ? drySample(at: time - delayTime * 2) * node.delay * 0.18 : 0
-        let combined = dry + firstEcho + secondEcho
-        let drive = 1 + node.distortion * 8
-        return node.distortion > 0.001
-            ? tanh(combined * drive) / max(1, tanh(drive))
-            : combined
+    /// Hornea síntesis y efectos al preparar la voz. El callback de audio solo
+    /// mezcla muestras y no calcula seno, potencia, ruido ni ecos en tiempo real.
+    private static func renderSamples(
+        node: SoundNode,
+        sampleRate: Double,
+        duration: TimeInterval,
+        baseFrequency: Double,
+        seed: UInt64
+    ) -> [Float] {
+        let count = max(1, Int(duration * sampleRate))
+        return (0..<count).map { index in
+            let time = Double(index) / sampleRate
+            let dry = drySample(
+                at: time,
+                node: node,
+                duration: duration,
+                sampleRate: sampleRate,
+                baseFrequency: baseFrequency,
+                seed: seed
+            )
+            let delayTime = 0.07 + Double(node.delay) * 0.48
+            let firstEcho = time >= delayTime
+                ? drySample(at: time - delayTime, node: node, duration: duration, sampleRate: sampleRate, baseFrequency: baseFrequency, seed: seed) * node.delay * 0.42
+                : 0
+            let secondEcho = time >= delayTime * 2
+                ? drySample(at: time - delayTime * 2, node: node, duration: duration, sampleRate: sampleRate, baseFrequency: baseFrequency, seed: seed) * node.delay * 0.18
+                : 0
+            let combined = dry + firstEcho + secondEcho
+            let drive = 1 + node.distortion * 8
+            return node.distortion > 0.001
+                ? tanh(combined * drive) / max(1, tanh(drive))
+                : combined
+        }
     }
 
-    private func drySample(at time: TimeInterval) -> Float {
-        guard time >= 0, time < soundDuration else { return 0 }
-        let progress = time / soundDuration
+    private static func drySample(
+        at time: TimeInterval,
+        node: SoundNode,
+        duration: TimeInterval,
+        sampleRate: Double,
+        baseFrequency: Double,
+        seed: UInt64
+    ) -> Float {
+        guard time >= 0, time < duration else { return 0 }
+        let progress = time / duration
         let envelopePower = node.type == .pad ? 1.15 : 3.4
         let envelope = Float(pow(max(0, 1 - progress), envelopePower))
-        let sine = Float(sin(2 * .pi * sweptFrequency(at: progress) * time))
-        let noise = deterministicNoise(sample: Int64(time * sampleRate))
+        let sine = Float(sin(2 * .pi * sweptFrequency(for: node.type, baseFrequency: baseFrequency, progress: progress) * time))
+        let noise = deterministicNoise(sample: Int64(time * sampleRate), seed: seed)
 
         let timbre: Float = switch node.type {
         case .kick: sine * Float(1 - progress * 0.55)
@@ -178,15 +215,19 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         return envelope * timbre
     }
 
-    private func sweptFrequency(at progress: Double) -> Double {
-        switch node.type {
+    private static func sweptFrequency(
+        for type: SoundNodeType,
+        baseFrequency: Double,
+        progress: Double
+    ) -> Double {
+        switch type {
         case .kick: baseFrequency * max(0.58, 1.85 - progress * 1.4)
         case .fx: baseFrequency * (1 + progress * 4)
         default: baseFrequency
         }
     }
 
-    private func deterministicNoise(sample: Int64) -> Float {
+    private static func deterministicNoise(sample: Int64, seed: UInt64) -> Float {
         var value = UInt64(bitPattern: sample) &+ seed
         value ^= value >> 30
         value &*= 0xbf58_476d_1ce4_e5b9
@@ -195,4 +236,5 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         value ^= value >> 31
         return Float(Double(value) / Double(UInt64.max) * 2 - 1)
     }
+
 }

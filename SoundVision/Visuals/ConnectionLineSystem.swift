@@ -18,6 +18,10 @@ enum ConnectionLineSystem {
         triggeredIDs: Set<UUID>
     ) {
         guard let container = root.findEntity(named: containerName) else { return }
+        let revision = revision(nodes: nodes, connections: connections, triggeredIDs: triggeredIDs)
+        guard container.components[ConnectionRevisionComponent.self]?.value != revision else { return }
+        container.components.set(ConnectionRevisionComponent(value: revision))
+
         let nodeMap = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
         let validNames = Set(connections.map { prefix + $0.id.uuidString })
 
@@ -60,4 +64,32 @@ enum ConnectionLineSystem {
         let style = NodeVisualStyle.style(for: node.type)
         return [node.positionX, node.positionY + style.verticalOffset, node.positionZ]
     }
+
+    private static func revision(
+        nodes: [SoundNode],
+        connections: [SoundConnection],
+        triggeredIDs: Set<UUID>
+    ) -> Int {
+        var hasher = Hasher()
+        for node in nodes {
+            hasher.combine(node.id)
+            hasher.combine(node.positionX)
+            hasher.combine(node.positionY)
+            hasher.combine(node.positionZ)
+            hasher.combine(node.isActive)
+        }
+        for connection in connections {
+            hasher.combine(connection.id)
+            hasher.combine(connection.sourceNodeID)
+            hasher.combine(connection.destinationNodeID)
+        }
+        for id in triggeredIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
+            hasher.combine(id)
+        }
+        return hasher.finalize()
+    }
+}
+
+private struct ConnectionRevisionComponent: Component {
+    var value: Int
 }

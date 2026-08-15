@@ -80,6 +80,58 @@ final class SoundVisionTests: XCTestCase {
     }
 
     @MainActor
+    func testSpatialDeviceSceneIsReadyToPlay() {
+        let state = CompositionState()
+        state.loadSpatialTestScene()
+
+        XCTAssertEqual(state.nodes.count, 5)
+        XCTAssertEqual(state.connections.count, 7)
+        XCTAssertTrue(state.isSpatialTestScene)
+        XCTAssertNotNil(state.selectedNode)
+        XCTAssertTrue(state.nodes.contains { $0.positionZ > 1.8 }, "La demo debe incluir una fuente detrás del usuario")
+
+        let timeline = GraphTransport.makeSchedule(
+            nodes: state.nodes,
+            connections: state.connections,
+            loopPasses: state.graphTransport.loopPasses
+        )
+        XCTAssertEqual(timeline.filter { $0.beat == 0 }.count, 2)
+        XCTAssertLessThan(timeline.count, 20)
+    }
+
+    @MainActor
+    func testNewCompositionLeavesDemoAndSpecificInstrumentCanBeAdded() {
+        let state = CompositionState()
+        state.loadSpatialTestScene()
+
+        state.startNewComposition()
+        let id = state.createNode(of: .bass, at: [0.4, 1.4, 0])
+
+        XCTAssertFalse(state.isSpatialTestScene)
+        XCTAssertEqual(state.nodes.count, 1)
+        XCTAssertEqual(state.nodes.first?.id, id)
+        XCTAssertEqual(state.nodes.first?.type, .bass)
+        XCTAssertEqual(state.connections.first?.sourceNodeID, nil)
+    }
+
+    func testSpatialSceneStaysAtHumanHeightAndMapsDrawerDrop() {
+        XCTAssertEqual(SpatialSceneLayout.rootPosition.y, 0, accuracy: 0.001)
+
+        let center = SpatialSceneLayout.dropPosition(
+            at: CGPoint(x: 500, y: 400),
+            in: CGSize(width: 1_000, height: 800)
+        )
+        let upperRight = SpatialSceneLayout.dropPosition(
+            at: CGPoint(x: 900, y: 100),
+            in: CGSize(width: 1_000, height: 800)
+        )
+
+        XCTAssertEqual(center.y, 1.325, accuracy: 0.001)
+        XCTAssertGreaterThan(upperRight.x, center.x)
+        XCTAssertGreaterThan(upperRight.y, center.y)
+    }
+
+    @MainActor
     func testSequencerStepDurationAt120BPM() {
         let sequencer = Sequencer()
         sequencer.bpm = 120

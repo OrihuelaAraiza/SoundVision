@@ -19,18 +19,21 @@ enum NodeEntityFactory {
         }
 
         root.addChild(WaveformVisualizer.makeWave(for: node.type))
+        root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
         root.addChild(makeSpatialReadout(for: node))
+        root.components.set(readoutState(for: node))
         return root
     }
 
     static func updateSpatialReadout(in root: Entity, node: SoundNode) {
-        let expectedName = readoutName(for: node)
-        guard root.findEntity(named: expectedName) == nil else { return }
+        let expectedState = readoutState(for: node)
+        guard root.components[NodeReadoutStateComponent.self] != expectedState else { return }
         for child in root.children where child.name.hasPrefix("node-readout-") {
             child.removeFromParent()
         }
         root.addChild(makeSpatialReadout(for: node))
+        root.components.set(expectedState)
     }
 
     private static func visualParts(for type: SoundNodeType, surface: RealityKit.Material) -> [ModelEntity] {
@@ -132,6 +135,14 @@ enum NodeEntityFactory {
         "node-readout-\(Int(node.pitch.rounded()))-\(Int((node.volume * 100).rounded()))-\(node.isActive)"
     }
 
+    private static func readoutState(for node: SoundNode) -> NodeReadoutStateComponent {
+        NodeReadoutStateComponent(
+            pitch: Int(node.pitch.rounded()),
+            volume: Int((node.volume * 100).rounded()),
+            isActive: node.isActive
+        )
+    }
+
     static func id(from entity: Entity) -> UUID? {
         var candidate: Entity? = entity
         while let current = candidate {
@@ -142,4 +153,10 @@ enum NodeEntityFactory {
         }
         return nil
     }
+}
+
+private struct NodeReadoutStateComponent: Component, Equatable {
+    var pitch: Int
+    var volume: Int
+    var isActive: Bool
 }

@@ -22,7 +22,8 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
 
 1. La experiencia comienza con un único núcleo **Play**.
 2. Arrastrar desde el núcleo extrae un nuevo organismo sonoro. Existe también
-   un botón de respaldo para simulador y accesibilidad.
+   un cajón visible de instrumentos: tocar añade al centro y arrastrar permite
+   elegir la posición inicial. El gesto desde Play se conserva como atajo.
 3. El nodo nace conectado al origen y se puede mover o rotar libremente.
 4. Seleccionar **Conectar** en un nodo y después tocar otro crea una conexión
    dirigida adicional.
@@ -39,7 +40,10 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
   mirada lo enfatiza junto al organismo sin convertirse en estado observable.
 - Un pinch selecciona el nodo y abre su inspector musical.
 - El nodo que emite sonido brilla, escala y genera una onda.
+- La selección activa motas sutiles; un ataque aumenta densidad, tamaño y giro.
 - Su conexión se ilumina y el núcleo responde a la actividad total.
+- Tres cintas orbitales alrededor de Play se deforman en GPU según reproducción
+  y cantidad de voces, creando una firma visual continua sin video precocinado.
 - Los nodos inactivos pierden saturación, movimiento y conexión visible.
 
 ## Arquitectura
@@ -47,7 +51,10 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
 - `SoundVisionMaterials` y `NodeVisualStyle`: lenguaje visual.
 - `NodeEntityFactory` y `NodeAnimationSystem`: organismos e interacción.
 - `TransportNodeFactory`: origen Play del grafo.
+- `SpatialSceneLayout`: altura física del lienzo y mapeo del drop 2D al grafo 3D.
 - `ConnectionLineSystem`: conexiones dirigidas dinámicas.
+- `ParticleEffectSystem`: emisores RealityKit y atlas animado 4 × 4.
+- `MetalEnergyFieldSystem` + `EnergyRibbons.metal`: `LowLevelMesh` y deformación GPU.
 - `SpatialParameterMapper`: traducción geometría-sonido.
 - `GraphTransport`: timeline concurrente, bifurcaciones y loops acotados.
 - `AudioEngineManager`: fuentes RealityKit Spatial Audio ligadas a las entidades,
@@ -64,4 +71,5 @@ calibrarse después de probarlos físicamente sin modificar gestos ni audio.
   espacialización, siguiendo la recomendación de Apple.
 
 La siguiente calibración debe hacerse en Vision Pro: sensibilidad del drag,
-rangos cómodos de altura/profundidad, legibilidad del inspector y carga gráfica.
+rangos cómodos de altura/profundidad, legibilidad del inspector, tamaño aparente
+de partículas y estabilidad de frame time con bifurcaciones activas.

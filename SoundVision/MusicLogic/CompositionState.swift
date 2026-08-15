@@ -14,11 +14,14 @@ final class CompositionState: ObservableObject {
     @Published var pendingConnectionSourceID: UUID?
     @Published var statusMessage: String?
     @Published var spatialAudioSession: SpatialAudioSession?
+    @Published var isSpatialTestScene = false
+    @Published var testStep = 0
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
     private let storage: CompositionStorage
     private var pulseClearTasks: [UUID: Task<Void, Never>] = [:]
+    private var previewClearTask: Task<Void, Never>?
     private var observations = Set<AnyCancellable>()
 
     init(storage: CompositionStorage = CompositionStorage()) {
@@ -49,6 +52,26 @@ final class CompositionState: ObservableObject {
         nodes[index].isActive.toggle()
     }
 
+    func clearSelection() {
+        selectedNodeID = nil
+        pendingConnectionSourceID = nil
+    }
+
+    func cancelConnection() {
+        pendingConnectionSourceID = nil
+        statusMessage = "Conexión cancelada."
+    }
+
+    func deleteSelectedNode() {
+        guard let id = selectedNodeID else { return }
+        stopPlayback()
+        nodes.removeAll { $0.id == id }
+        connections.removeAll { $0.sourceNodeID == id || $0.destinationNodeID == id }
+        selectedNodeID = nil
+        pendingConnectionSourceID = nil
+        statusMessage = "Nodo eliminado."
+    }
+
     func beginConnection() {
         pendingConnectionSourceID = selectedNodeID
         statusMessage = selectedNodeID == nil ? "Selecciona primero un nodo." : "Selecciona el nodo destino."
@@ -73,6 +96,15 @@ final class CompositionState: ObservableObject {
     @discardableResult
     func createNextNode(at position: SIMD3<Float>? = nil, connectedFrom sourceID: UUID? = nil) -> UUID {
         let type = SoundNodeType.allCases[nodes.count % SoundNodeType.allCases.count]
+        return createNode(of: type, at: position, connectedFrom: sourceID)
+    }
+
+    @discardableResult
+    func createNode(
+        of type: SoundNodeType,
+        at position: SIMD3<Float>? = nil,
+        connectedFrom sourceID: UUID? = nil
+    ) -> UUID {
         let spawnIndex = Float(nodes.count)
         let defaultPosition = SIMD3<Float>(
             0.48 + cos(spawnIndex * 1.4) * 0.5,
@@ -92,6 +124,7 @@ final class CompositionState: ObservableObject {
         nodes.append(node)
         connect(sourceID: sourceID, destinationID: node.id)
         selectedNodeID = node.id
+        statusMessage = "\(displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
         return node.id
     }
 
@@ -148,9 +181,84 @@ final class CompositionState: ObservableObject {
         )
     }
 
+    func previewSelectedNode() {
+        guard let node = selectedNode, node.isActive else {
+            statusMessage = "Selecciona un nodo activo para escucharlo."
+            return
+        }
+        stopPlayback()
+        let session = SpatialAudioSession(
+            nodes: [node],
+            events: [GraphPlaybackEvent(nodeID: node.id, beat: 0)],
+            secondsPerBeat: 1,
+            leadInSeconds: 0.14
+        )
+        spatialAudioSession = session
+        triggerVisualPulse(for: node.id, delay: session.leadInSeconds)
+        statusMessage = "Preview espacial: mueve la cabeza para localizar \(node.name)."
+
+        previewClearTask?.cancel()
+        previewClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.35))
+            guard let self, !Task.isCancelled, self.spatialAudioSession?.id == session.id else { return }
+            self.spatialAudioSession = nil
+        }
+    }
+
+    func loadSpatialTestScene() {
+        stopPlayback()
+        sequencer.bpm = 92
+        graphTransport.loopPasses = 2
+
+        let kick = testNode("Kick frontal", .kick, position: [0, 1.18, 0.78])
+        let bass = testNode("Bass izquierdo", .bass, position: [-1.15, 1.0, -0.18])
+        let hat = testNode("Hi-hat derecho", .hiHat, position: [1.12, 1.62, 0.12])
+        let pad = testNode("Pad alto y lejano", .pad, position: [0.12, 2.15, -1.35], rotation: [.pi * 0.62, 0, 0])
+        let fx = testNode("FX posterior", .fx, position: [0, 1.32, 2.28], rotation: [0, .pi * 0.48, .pi * 0.22])
+        nodes = [kick, bass, hat, pad, fx]
+
+        connections = [
+            testConnection(from: nil, to: kick),
+            testConnection(from: nil, to: fx),
+            testConnection(from: kick, to: bass),
+            testConnection(from: kick, to: hat),
+            testConnection(from: bass, to: pad),
+            testConnection(from: hat, to: pad),
+            testConnection(from: pad, to: fx)
+        ]
+        recalculateAllConnections()
+        selectedNodeID = kick.id
+        pendingConnectionSourceID = nil
+        isSpatialTestScene = true
+        testStep = 0
+        statusMessage = "Prueba lista: pulsa Play y localiza el FX detrás de ti."
+    }
+
+    func advanceTestStep() {
+        testStep = min(testStep + 1, Self.spatialTestInstructions.count - 1)
+    }
+
+    func previousTestStep() {
+        testStep = max(testStep - 1, 0)
+    }
+
+    func closeTestGuide() {
+        isSpatialTestScene = false
+    }
+
+    static let spatialTestInstructions = [
+        "Pulsa Play. Debes oír Kick al frente y FX detrás; gira la cabeza para confirmar la localización.",
+        "Selecciona Bass o Hi-hat y pulsa Escuchar. Compara izquierda y derecha sin mover el nodo.",
+        "Arrastra un nodo arriba/abajo y cerca/lejos. Repite Escuchar para comprobar pitch, volumen y distancia.",
+        "Rota Pad o FX y escucha reverb, delay y distorsión. Después crea una conexión nueva entre dos nodos.",
+        "Detén, vuelve a reproducir y comprueba que controles, ondas y audio permanecen sincronizados."
+    ]
+
     func stopPlayback() {
         graphTransport.stop()
         spatialAudioSession = nil
+        previewClearTask?.cancel()
+        previewClearTask = nil
         pulseClearTasks.values.forEach { $0.cancel() }
         pulseClearTasks = [:]
         lastTriggeredNodeIDs = []
@@ -178,29 +286,38 @@ final class CompositionState: ObservableObject {
             pendingConnectionSourceID = nil
             recalculateAllConnections()
             statusMessage = "Composición espacial cargada."
+            isSpatialTestScene = false
         } catch {
             statusMessage = error.localizedDescription
         }
     }
 
     func reset() {
+        startNewComposition(message: "Lienzo espacial restaurado.")
+    }
+
+    func startNewComposition(message: String = "Nueva pista lista. Elige un sonido del cajón para comenzar.") {
         stopPlayback()
         nodes = []
         connections = []
         lastTriggeredNodeIDs = []
         selectedNodeID = nil
         pendingConnectionSourceID = nil
-        statusMessage = "Lienzo espacial restaurado."
+        statusMessage = message
+        isSpatialTestScene = false
+        testStep = 0
     }
 
     var snapshot: Composition {
         Composition(title: "Anatomía del Sonido", bpm: sequencer.bpm, steps: Sequencer.totalSteps, nodes: nodes, connections: connections)
     }
 
-    private func triggerVisualPulse(for nodeID: UUID) {
-        lastTriggeredNodeIDs.insert(nodeID)
+    private func triggerVisualPulse(for nodeID: UUID, delay: TimeInterval = 0) {
         pulseClearTasks[nodeID]?.cancel()
         pulseClearTasks[nodeID] = Task { @MainActor [weak self] in
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled else { return }
+            self?.lastTriggeredNodeIDs.insert(nodeID)
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
             self?.lastTriggeredNodeIDs.remove(nodeID)
@@ -243,8 +360,42 @@ final class CompositionState: ObservableObject {
         [
             max(-2.4, min(value.x, 2.4)),
             max(0.35, min(value.y, 2.5)),
-            max(-1.8, min(value.z, 1.1))
+            max(-2.0, min(value.z, 2.4))
         ]
+    }
+
+    private func testNode(
+        _ name: String,
+        _ type: SoundNodeType,
+        position: SIMD3<Float>,
+        rotation: SIMD3<Float> = .zero
+    ) -> SoundNode {
+        let effects = SpatialParameterMapper.effects(from: rotation)
+        return SoundNode(
+            name: name,
+            type: type,
+            volume: SpatialParameterMapper.volume(forDepth: position.z),
+            pitch: SpatialParameterMapper.pitch(forHeight: position.y),
+            positionX: position.x,
+            positionY: position.y,
+            positionZ: position.z,
+            rotationX: rotation.x,
+            rotationY: rotation.y,
+            rotationZ: rotation.z,
+            reverb: effects.reverb,
+            delay: effects.delay,
+            distortion: effects.distortion
+        )
+    }
+
+    private func testConnection(from source: SoundNode?, to destination: SoundNode) -> SoundConnection {
+        let sourcePosition = source.map { SIMD3<Float>($0.positionX, $0.positionY, $0.positionZ) } ?? Self.playNodePosition
+        let destinationPosition = SIMD3<Float>(destination.positionX, destination.positionY, destination.positionZ)
+        return SoundConnection(
+            sourceNodeID: source?.id,
+            destinationNodeID: destination.id,
+            durationBeats: SpatialParameterMapper.durationBeats(from: sourcePosition, to: destinationPosition)
+        )
     }
 
     private func displayName(for type: SoundNodeType) -> String {

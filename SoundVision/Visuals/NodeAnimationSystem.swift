@@ -17,9 +17,19 @@ enum NodeAnimationSystem {
         let scale = isTriggered ? style.triggerScale : (node.isActive ? style.baseScale : style.baseScale * 0.78)
         entity.scale = SIMD3(repeating: scale)
 
-        updateMaterials(in: entity, node: node, isTriggered: isTriggered)
+        let renderedState = NodeRenderedStateComponent(isActive: node.isActive, isTriggered: isTriggered)
+        if entity.components[NodeRenderedStateComponent.self] != renderedState {
+            updateMaterials(in: entity, node: node, isTriggered: isTriggered)
+            WaveformVisualizer.updateWave(in: entity, type: node.type, isTriggered: isTriggered)
+            entity.components.set(renderedState)
+        }
         updatePersonality(in: entity, node: node, isTriggered: isTriggered, time: time)
-        WaveformVisualizer.updateWave(in: entity, type: node.type, isTriggered: isTriggered)
+        ParticleEffectSystem.updateNode(
+            in: entity,
+            isSelected: isSelected,
+            isTriggered: isTriggered,
+            isActive: node.isActive
+        )
 
         if let halo = entity.findEntity(named: "selection-halo") {
             halo.isEnabled = isSelected
@@ -70,4 +80,9 @@ enum NodeAnimationSystem {
             break
         }
     }
+}
+
+private struct NodeRenderedStateComponent: Component, Equatable {
+    var isActive: Bool
+    var isTriggered: Bool
 }
