@@ -6,6 +6,9 @@ struct SpatialAudioSession: Identifiable, Sendable {
     let id: UUID
     let nodes: [SoundNode]
     let events: [GraphPlaybackEvent]
+    /// Cuánto sostiene cada organismo antes de que arranque el siguiente. Es la
+    /// distancia horizontal traducida a tiempo: lejos sostiene, cerca es staccato.
+    let sustainBeats: [UUID: Double]
     let secondsPerBeat: Double
     let startHostTime: UInt64
     let leadInSeconds: TimeInterval
@@ -14,6 +17,7 @@ struct SpatialAudioSession: Identifiable, Sendable {
         id: UUID = UUID(),
         nodes: [SoundNode],
         events: [GraphPlaybackEvent],
+        sustainBeats: [UUID: Double] = [:],
         secondsPerBeat: Double,
         // Margen suficiente para que SwiftUI propague la sesión, RealityKit
         // conecte las fuentes y la síntesis quede horneada antes del primer
@@ -24,6 +28,7 @@ struct SpatialAudioSession: Identifiable, Sendable {
         self.id = id
         self.nodes = nodes
         self.events = events
+        self.sustainBeats = sustainBeats
         self.secondsPerBeat = secondsPerBeat
         self.leadInSeconds = leadInSeconds
         startHostTime = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: leadInSeconds)
@@ -86,7 +91,11 @@ final class AudioEngineManager: ObservableObject {
                     forSeconds: event.beat * session.secondsPerBeat
                 )
             }
-            let renderer = SpatialVoiceRenderer(node: node, attackHostTimes: attackHostTimes)
+            let renderer = SpatialVoiceRenderer(
+                node: node,
+                sustainSeconds: session.sustainBeats[nodeID].map { $0 * session.secondsPerBeat },
+                attackHostTimes: attackHostTimes
+            )
 
             do {
                 let controller = try entity.prepareAudio(
@@ -149,29 +158,15 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     /// voces nunca llegaron a engancharse".
     private(set) var didRenderAudibleSample = false
 
-    init(node: SoundNode, attackHostTimes: [UInt64]) {
+    init(node: SoundNode, sustainSeconds: TimeInterval? = nil, attackHostTimes: [UInt64]) {
         // Ordenados para poder acotar por búsqueda binaria qué ataques pueden
         // sonar en un bloque concreto, en vez de recorrerlos todos por frame.
         attackSeconds = attackHostTimes.map(AVAudioTime.seconds(forHostTime:)).sorted()
-        soundDuration = node.type == .pad || node.type == .fx ? 0.9 : 0.38
-        let fundamental: Double = switch node.type {
-        case .kick: 62
-        case .snare: 185
-        case .hiHat: 1_400
-        case .clap: 520
-        case .bass: 92
-        case .pad: 220
-        case .lead: 660
-        case .fx: 310
-        }
-        let baseFrequency = fundamental * pow(2, Double(node.pitch) / 12)
-        let seed = UInt64(node.type.rawValue.utf8.reduce(17) { $0 &* 31 &+ UInt64($1) })
-        samples = Self.renderSamples(
+        soundDuration = VoiceSynthesis.duration(for: node.type, sustainSeconds: sustainSeconds)
+        samples = VoiceSynthesis.bake(
             node: node,
-            sampleRate: sampleRate,
-            duration: soundDuration,
-            baseFrequency: baseFrequency,
-            seed: seed
+            sustainSeconds: sustainSeconds,
+            sampleRate: 48_000
         )
     }
 
@@ -268,96 +263,6 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             }
         }
         return low
-    }
-
-    /// Hornea síntesis y efectos al preparar la voz. El callback de audio solo
-    /// mezcla muestras y no calcula seno, potencia, ruido ni ecos en tiempo real.
-    private static func renderSamples(
-        node: SoundNode,
-        sampleRate: Double,
-        duration: TimeInterval,
-        baseFrequency: Double,
-        seed: UInt64
-    ) -> [Float] {
-        let count = max(1, Int(duration * sampleRate))
-        // La señal seca se calcula una sola vez y los ecos la reindexan. Antes
-        // cada muestra evaluaba `drySample` tres veces, triplicando el trabajo
-        // trigonométrico justo en el momento de pulsar Play.
-        let dry = (0..<count).map { index in
-            drySample(
-                at: Double(index) / sampleRate,
-                node: node,
-                duration: duration,
-                sampleRate: sampleRate,
-                baseFrequency: baseFrequency,
-                seed: seed
-            )
-        }
-
-        let delayOffset = max(1, Int((0.07 + Double(node.delay) * 0.48) * sampleRate))
-        let drive = 1 + node.distortion * 8
-        let normalization = max(1, tanh(drive))
-
-        return (0..<count).map { index in
-            var combined = dry[index]
-            if index >= delayOffset {
-                combined += dry[index - delayOffset] * node.delay * 0.42
-            }
-            if index >= delayOffset * 2 {
-                combined += dry[index - delayOffset * 2] * node.delay * 0.18
-            }
-            return node.distortion > 0.001 ? tanh(combined * drive) / normalization : combined
-        }
-    }
-
-    private static func drySample(
-        at time: TimeInterval,
-        node: SoundNode,
-        duration: TimeInterval,
-        sampleRate: Double,
-        baseFrequency: Double,
-        seed: UInt64
-    ) -> Float {
-        guard time >= 0, time < duration else { return 0 }
-        let progress = time / duration
-        let envelopePower = node.type == .pad ? 1.15 : 3.4
-        let envelope = Float(pow(max(0, 1 - progress), envelopePower))
-        let sine = Float(sin(2 * .pi * sweptFrequency(for: node.type, baseFrequency: baseFrequency, progress: progress) * time))
-        let noise = deterministicNoise(sample: Int64(time * sampleRate), seed: seed)
-
-        let timbre: Float = switch node.type {
-        case .kick: sine * Float(1 - progress * 0.55)
-        case .snare: sine * 0.24 + noise * 0.62
-        case .hiHat: noise * 0.4 + Float(sin(2 * .pi * 6_200 * time)) * 0.16
-        case .clap: noise * (Int(time * sampleRate) % 1_050 < 330 ? 0.52 : 0.11)
-        case .bass: (sine + Float(sin(2 * .pi * baseFrequency * 2 * time)) * 0.24) * 0.66
-        case .pad: (sine + Float(sin(2 * .pi * baseFrequency * 1.5 * time)) * 0.34) * 0.4
-        case .lead: sine > 0 ? 0.4 : -0.4
-        case .fx: sine * 0.3 + noise * 0.1
-        }
-        return envelope * timbre
-    }
-
-    private static func sweptFrequency(
-        for type: SoundNodeType,
-        baseFrequency: Double,
-        progress: Double
-    ) -> Double {
-        switch type {
-        case .kick: baseFrequency * max(0.58, 1.85 - progress * 1.4)
-        case .fx: baseFrequency * (1 + progress * 4)
-        default: baseFrequency
-        }
-    }
-
-    private static func deterministicNoise(sample: Int64, seed: UInt64) -> Float {
-        var value = UInt64(bitPattern: sample) &+ seed
-        value ^= value >> 30
-        value &*= 0xbf58_476d_1ce4_e5b9
-        value ^= value >> 27
-        value &*= 0x94d0_49bb_1331_11eb
-        value ^= value >> 31
-        return Float(Double(value) / Double(UInt64.max) * 2 - 1)
     }
 
 }

@@ -65,8 +65,14 @@ Registra: cuál fuente se localiza mejor y si alguna parece estar dentro de la c
 
 ### 3. Altura y profundidad
 
-1. Selecciona un nodo y arrástralo hacia arriba; su pitch debe subir.
-2. Arrástralo hacia abajo; su pitch debe bajar.
+1. **Afinación.** Sube un nodo poco a poco: la nota debe **saltar de grado en
+   grado**, no deslizarse, y el inspector debe mostrar el nombre (La4, Do5…).
+   Coloca cuatro o cinco nodos a alturas cualesquiera y reproduce: deben sonar
+   afinados entre sí, sin ninguna nota que chirríe.
+2. **Duración por distancia.** Separa dos nodos tonales (Pad, Bass, Lead): el
+   primero debe **sostener** más. Júntalos: debe quedar staccato. Repite con
+   Kick o Hi-hat: su golpe **no** debe alargarse.
+3. Arrástralo hacia abajo; su pitch debe bajar.
 3. Acércalo y aléjalo; volumen y distancia acústica deben cambiar suavemente.
 4. Pulsa **Escuchar desde aquí** después de cada posición.
 

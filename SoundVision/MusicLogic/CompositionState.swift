@@ -154,6 +154,19 @@ final class CompositionState: ObservableObject {
         recalculateDurationSummary(for: destinationID)
     }
 
+    /// Cuánto sostiene cada organismo: hasta que arranca el siguiente al que
+    /// apunta. Con varias ramas manda la más corta, porque es la primera que
+    /// releva a este nodo. Sin salidas, la nota se apaga por su cuenta.
+    func sustainBeatsByNode() -> [UUID: Double] {
+        var result: [UUID: Double] = [:]
+        for connection in connections {
+            guard let sourceID = connection.sourceNodeID else { continue }
+            let beats = max(0.0625, connection.durationBeats)
+            result[sourceID] = min(result[sourceID] ?? .greatestFiniteMagnitude, beats)
+        }
+        return result
+    }
+
     /// Destino más cercano al punto donde se soltó el hilo. El radio generoso
     /// evita exigir puntería fina con las manos a un metro de distancia.
     func nearestNode(to point: SIMD3<Float>, excluding excludedID: UUID?, within radius: Float) -> UUID? {
@@ -255,6 +268,7 @@ final class CompositionState: ObservableObject {
                 let session = SpatialAudioSession(
                     nodes: Array(nodesByID.values),
                     events: timeline,
+                    sustainBeats: self.sustainBeatsByNode(),
                     secondsPerBeat: secondsPerBeat
                 )
                 self.spatialAudioSession = session
@@ -278,8 +292,10 @@ final class CompositionState: ObservableObject {
         let session = SpatialAudioSession(
             nodes: [node],
             events: [GraphPlaybackEvent(nodeID: node.id, beat: 0)],
-            secondsPerBeat: 1,
-            leadInSeconds: 0.14
+            // El preview usa el mismo sostenido que tendría al reproducirse.
+            sustainBeats: sustainBeatsByNode().filter { $0.key == node.id },
+            secondsPerBeat: 60 / max(sequencer.bpm, 1),
+            leadInSeconds: 0.2
         )
         spatialAudioSession = session
         triggerVisualPulse(for: node.id, delay: session.leadInSeconds)

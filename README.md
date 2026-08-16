@@ -59,6 +59,28 @@ Para componer desde cero, pulsa **Nueva pista** y usa **Añadir sonido** en la
 consola. También puedes tirar del núcleo Play dentro del espacio para extraer un
 organismo nuevo en el punto donde sueltes.
 
+## Cómo el espacio se convierte en música
+
+El espacio 3D no es decorado: cada eje controla un parámetro distinto, y esa es
+la idea central del proyecto.
+
+| Eje | Parámetro |
+|---|---|
+| Vertical | **Nota.** La altura salta entre grados de una escala pentatónica menor, ~11 cm por nota. |
+| Adelante · atrás | **Volumen.** Acercar un organismo lo hace sonar más presente. |
+| Distancia horizontal entre dos organismos | **Duración.** El primero sostiene hasta que arranca el segundo. |
+| Rotación X · Y · Z | **Reverb · delay · distorsión.** |
+
+La afinación se cuantiza a propósito. Con semitonos continuos, un organismo podía
+quedar a +7.3 semitonos y la pieza entera sonaba microtonal por muy buena que
+fuese la síntesis. La pentatónica es la escala en la que casi cualquier
+combinación suena bien junta, así que colocar organismos a ojo produce música.
+
+La distancia horizontal gobierna las dos caras del tiempo: cuándo entra el
+siguiente organismo y cuánto sostiene el anterior. Separar dos organismos alarga
+la nota; juntarlos la vuelve staccato. Los percusivos son la excepción: un golpe
+es un golpe y no se estira por alejarlo.
+
 ## Gestos
 
 Todo lo que construye la música se hace con las manos, dentro del espacio:

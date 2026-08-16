@@ -209,7 +209,10 @@ struct StudioConsoleView: View {
 
                 positionControls(for: node)
 
-                parameter("Altura · Pitch", value: String(format: "%+.1f st", node.pitch))
+                parameter(
+                    "Altura · Nota",
+                    value: "\(SpatialParameterMapper.noteName(forSemitones: node.pitch))  (\(String(format: "%+.0f", node.pitch)) st)"
+                )
                 parameter("Profundidad · Volumen", value: "\(Int(node.volume * 100)) %")
                 parameter("Distancia · Duración", value: String(format: "%.2f beats", node.durationBeats))
                 parameter("Rotación X · Reverb", value: "\(Int(node.reverb * 100)) %")
