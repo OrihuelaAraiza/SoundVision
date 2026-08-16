@@ -49,6 +49,10 @@ struct SoundNode: Identifiable, Codable, Equatable, Sendable {
     var reverb: Float
     var delay: Float
     var distortion: Float
+    /// Con el sonido fijo, mover el organismo solo lo recoloca: pitch, volumen
+    /// y duración dejan de derivarse de su posición. Permite ordenar el espacio
+    /// sin desafinar la composición.
+    var isSoundLocked: Bool
 
     init(
         id: UUID = UUID(),
@@ -67,7 +71,8 @@ struct SoundNode: Identifiable, Codable, Equatable, Sendable {
         durationBeats: Double = 1,
         reverb: Float = 0,
         delay: Float = 0,
-        distortion: Float = 0
+        distortion: Float = 0,
+        isSoundLocked: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -86,6 +91,7 @@ struct SoundNode: Identifiable, Codable, Equatable, Sendable {
         self.reverb = reverb
         self.delay = delay
         self.distortion = distortion
+        self.isSoundLocked = isSoundLocked
     }
 
     static func starterPattern(radius: Float = 1.15) -> [SoundNode] {
@@ -114,7 +120,7 @@ struct SoundNode: Identifiable, Codable, Equatable, Sendable {
         case id, name, type, isActive, volume, pitch, stepIndex
         case positionX, positionY, positionZ
         case rotationX, rotationY, rotationZ, durationBeats
-        case reverb, delay, distortion
+        case reverb, delay, distortion, isSoundLocked
     }
 
     init(from decoder: Decoder) throws {
@@ -136,6 +142,7 @@ struct SoundNode: Identifiable, Codable, Equatable, Sendable {
         reverb = try values.decodeIfPresent(Float.self, forKey: .reverb) ?? 0
         delay = try values.decodeIfPresent(Float.self, forKey: .delay) ?? 0
         distortion = try values.decodeIfPresent(Float.self, forKey: .distortion) ?? 0
+        isSoundLocked = try values.decodeIfPresent(Bool.self, forKey: .isSoundLocked) ?? false
     }
 }
 

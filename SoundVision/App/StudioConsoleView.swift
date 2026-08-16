@@ -99,6 +99,13 @@ struct StudioConsoleView: View {
             .font(.callout.monospacedDigit())
             .disabled(state.graphTransport.isPlaying)
 
+            if let problem = state.audioProblem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let message = state.statusMessage {
                 Text(message)
                     .font(.footnote)
@@ -183,6 +190,22 @@ struct StudioConsoleView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                Toggle(isOn: Binding(
+                    get: { node.isSoundLocked },
+                    set: { _ in state.toggleSoundLock(id: node.id) }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Sonido fijo", systemImage: node.isSoundLocked ? "lock.fill" : "lock.open")
+                            .font(.callout.weight(.medium))
+                        Text(node.isSoundLocked
+                             ? "Muévelo para ordenar: no cambiará de sonido."
+                             : "Al moverlo, la posición ajusta pitch y volumen.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .tint(.cyan)
 
                 parameter("Altura · Pitch", value: String(format: "%+.1f st", node.pitch))
                 parameter("Profundidad · Volumen", value: "\(Int(node.volume * 100)) %")

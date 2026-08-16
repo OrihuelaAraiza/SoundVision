@@ -67,6 +67,7 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 |---|---|
 | Pinch sobre un organismo | Lo selecciona. Repetirlo lo suelta. |
 | Arrastrar su cuerpo | Lo mueve: altura → pitch, profundidad → volumen. |
+| Arrastrarlo con **sonido fijo** | Solo lo recoloca, sin tocar su sonido. |
 | **Tirar del punto luminoso de abajo** | **Traza un hilo. Suéltalo sobre otro organismo para conectarlos.** |
 | Pinch sobre una conexión | La corta. |
 | Girar con dos manos | Reverb, delay y distorsión. |
@@ -76,6 +77,14 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 Conectar no tiene modo ni botón: se tira de un hilo y se suelta donde quieras.
 Mientras el hilo está en el aire, el destino candidato se ilumina, así que sabes
 dónde va a engancharse antes de soltar.
+
+### Ordenar sin desafinar
+
+La posición controla el sonido, lo que hacía imposible acomodar el grafo sin
+rehacer la composición: cualquier intento de ordenar desafinaba. Cada organismo
+tiene ahora un candado de **sonido fijo** en el inspector. Cerrado, moverlo solo
+lo recoloca —pitch, volumen y la duración de sus conexiones quedan congelados— y
+aparece un pedestal bajo el organismo para que se vea cuáles están fijos.
 
 Ninguna acción destructiva pide confirmación. En su lugar, la consola mantiene
 **Deshacer** disponible con el nombre de lo último que hiciste, así que cortar

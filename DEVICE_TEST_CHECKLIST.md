@@ -41,7 +41,10 @@ llegue a presentarse.
 ### 1. Localización inicial
 
 1. Pulsa **Reproducir**.
-2. Confirma que **la primera nota suena** y no se pierde: el ataque inicial debe
+2. **Confirma que suena algo.** Si no, mira la consola: un aviso naranja dirá si
+   las voces no llegaron a engancharse o si están conectadas pero mudas. Anota
+   cuál de los dos aparece — distinguen dos causas muy distintas.
+3. Confirma que **la primera nota suena** y no se pierde: el ataque inicial debe
    oírse completo, no entrar a medias.
 3. Confirma que las cintas alrededor de Play aceleran y ondulan sin saltos, y
    que la animación de reposo es fluida y no a tirones.
@@ -93,6 +96,11 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
 6. Añade ocho nodos, borra dos del medio y añade tres más: **ninguno debe
    aparecer encima de otro**.
 7. Haz pinch sobre el nodo ya seleccionado: debe soltarse la selección.
+8. **Ordenar sin desafinar.** Activa **Sonido fijo** en un nodo: debe aparecer un
+   pedestal bajo él. Muévelo por todo el espacio y confirma que pitch, volumen y
+   duración **no cambian** en el inspector. Desactívalo y confirma que vuelve a
+   afinarse al moverlo. Acomoda toda la composición con los candados puestos y
+   comprueba que suena exactamente igual que antes de ordenarla.
 8. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté detenido.
 9. Selecciona un nodo detenido: debe mostrar pocas partículas. Al escucharlo,
    la emisión debe intensificarse y después desaparecer sin quedar residuos.

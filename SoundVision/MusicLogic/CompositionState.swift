@@ -17,6 +17,8 @@ final class CompositionState: ObservableObject {
     @Published var testStep = 0
     @Published private(set) var sceneContentRevision = 0
     @Published private(set) var undoLabel: String?
+    /// Solo tiene valor cuando el motor de audio tiene algo que reportar.
+    @Published var audioProblem: String?
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
@@ -197,9 +199,21 @@ final class CompositionState: ObservableObject {
         nodes[index].positionX = value.x
         nodes[index].positionY = value.y
         nodes[index].positionZ = value.z
+
+        // Con el sonido fijo el organismo se recoloca sin desafinarse: es lo
+        // que permite ordenar el espacio sin rehacer la composición.
+        guard !nodes[index].isSoundLocked else { return }
         nodes[index].pitch = SpatialParameterMapper.pitch(forHeight: value.y)
         nodes[index].volume = SpatialParameterMapper.volume(forDepth: value.z)
         recalculateConnections(touching: id)
+    }
+
+    func toggleSoundLock(id: UUID) {
+        guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        nodes[index].isSoundLocked.toggle()
+        statusMessage = nodes[index].isSoundLocked
+            ? "\(nodes[index].name): sonido fijo. Muévelo libremente para ordenar."
+            : "\(nodes[index].name): la posición vuelve a controlar su sonido."
     }
 
     /// La rotación se acumula sobre el valor que el nodo tenía al empezar el
@@ -413,8 +427,16 @@ final class CompositionState: ObservableObject {
         Set(affected).forEach(recalculateDurationSummary)
     }
 
+    /// La duración nace de la distancia entre extremos, así que un extremo con
+    /// el sonido fijo también congela el tiempo de su conexión. De otro modo,
+    /// recolocar un nodo "fijo" seguiría alterando el ritmo.
     private func recalculateConnection(at index: Int) {
         let connection = connections[index]
+        let endpointIsLocked = [connection.sourceNodeID, connection.destinationNodeID]
+            .compactMap { $0 }
+            .contains { node(id: $0)?.isSoundLocked == true }
+        guard !endpointIsLocked else { return }
+
         let source = connection.sourceNodeID.flatMap(position(of:)) ?? Self.playNodePosition
         guard let destination = position(of: connection.destinationNodeID) else { return }
         connections[index].durationBeats = SpatialParameterMapper.durationBeats(from: source, to: destination)

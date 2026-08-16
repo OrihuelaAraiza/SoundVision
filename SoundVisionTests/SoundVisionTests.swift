@@ -250,6 +250,54 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertNil(state.nearestNode(to: [0.02, 1.25, 0], excluding: origin, within: 0.1))
     }
 
+    /// El punto del candado: ordenar el espacio sin tocar la composición.
+    @MainActor
+    func testLockedNodeCanBeMovedWithoutChangingItsSound() {
+        let state = CompositionState()
+        let id = state.createNode(of: .pad, at: [0, 1.25, 0])
+        guard let before = state.node(id: id) else { return XCTFail("Nodo perdido") }
+
+        state.toggleSoundLock(id: id)
+        state.moveNode(id: id, to: [1.1, 2.2, -1.4])
+
+        guard let after = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertTrue(after.isSoundLocked)
+        XCTAssertEqual(after.positionY, 2.2, accuracy: 0.001, "Debe recolocarse igualmente")
+        XCTAssertEqual(after.positionX, 1.1, accuracy: 0.001)
+        XCTAssertEqual(after.pitch, before.pitch, accuracy: 0.001, "El pitch no debe moverse")
+        XCTAssertEqual(after.volume, before.volume, accuracy: 0.001, "El volumen no debe moverse")
+    }
+
+    /// Un extremo fijo también congela el tiempo de su conexión: si no, mover
+    /// un nodo "fijo" seguiría alterando el ritmo.
+    @MainActor
+    func testLockingAnEndpointFreezesItsConnectionDuration() {
+        let state = CompositionState()
+        let source = state.createNode(of: .kick, at: [0, 1.25, 0])
+        let destination = state.createNode(of: .bass, at: [0.5, 1.25, 0])
+        state.connect(sourceID: source, destinationID: destination)
+
+        guard let durationBefore = state.connections.last?.durationBeats else {
+            return XCTFail("Sin conexión")
+        }
+        state.toggleSoundLock(id: destination)
+        state.moveNode(id: destination, to: [2.0, 1.25, 0])
+
+        XCTAssertEqual(state.connections.last?.durationBeats, durationBefore)
+    }
+
+    /// Sin candado, el comportamiento original debe seguir intacto.
+    @MainActor
+    func testUnlockedNodeStillRetunesWhenMoved() {
+        let state = CompositionState()
+        let id = state.createNode(of: .lead, at: [0, 1.25, 0])
+
+        state.moveNode(id: id, to: [0, 2.0, 0.6])
+        guard let after = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(after.pitch, SpatialParameterMapper.pitch(forHeight: 2.0), accuracy: 0.001)
+        XCTAssertEqual(after.volume, SpatialParameterMapper.volume(forDepth: 0.6), accuracy: 0.001)
+    }
+
     @MainActor
     func testSequencerStepDurationAt120BPM() {
         let sequencer = Sequencer()

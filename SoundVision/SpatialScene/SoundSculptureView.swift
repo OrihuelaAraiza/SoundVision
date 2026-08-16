@@ -33,6 +33,7 @@ struct SoundSculptureView: View {
             reconcileNodes(in: root)
             audioEngine.synchronize(session: state.spatialAudioSession, in: root)
             syncVisualState(in: root)
+            reportAudioProblem()
         }
         .gesture(tapGesture)
         .simultaneousGesture(dragGesture)
@@ -228,6 +229,15 @@ struct SoundSculptureView: View {
         }
 
         updateTendril(in: root)
+    }
+
+    /// Publica el diagnóstico del motor **fuera** del ciclo de actualización:
+    /// escribir estado observado desde dentro de `update` es justamente lo que
+    /// antes dejaba a SwiftUI recalculando sin parar.
+    private func reportAudioProblem() {
+        let problem = audioEngine.problemSummary
+        guard problem != state.audioProblem else { return }
+        Task { @MainActor in state.audioProblem = problem }
     }
 
     /// Hilo que sigue la mano mientras se traza una conexión.

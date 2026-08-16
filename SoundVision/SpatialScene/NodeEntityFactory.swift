@@ -5,6 +5,7 @@ import UIKit
 enum NodeEntityFactory {
     static let nodePrefix = "sound-node-"
     static let connectorName = "node-connector"
+    static let soundLockName = "node-sound-lock"
 
     static func makeNode(_ node: SoundNode) -> Entity {
         let root = Entity()
@@ -23,6 +24,7 @@ enum NodeEntityFactory {
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
         root.addChild(makeConnector(for: node.type))
+        root.addChild(makeSoundLockPlinth())
         root.addChild(makeSpatialReadout(for: node))
         root.components.set(readoutState(for: node))
         return root
@@ -44,6 +46,19 @@ enum NodeEntityFactory {
         // la puntería fina es incómoda.
         connector.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.085)]))
         return connector
+    }
+
+    /// Pedestal que aparece bajo el organismo cuando su sonido está fijo. La
+    /// metáfora es la del objeto asentado: puedes moverlo sin que cambie.
+    private static func makeSoundLockPlinth() -> ModelEntity {
+        let plinth = ModelEntity(
+            mesh: .generateCylinder(height: 0.007, radius: 0.23),
+            materials: [UnlitMaterial(color: UIColor.white.withAlphaComponent(0.34))]
+        )
+        plinth.name = soundLockName
+        plinth.position = [0, -0.33, 0]
+        plinth.isEnabled = false
+        return plinth
     }
 
     /// Distingue el conector del resto del organismo. Se detiene al llegar a la

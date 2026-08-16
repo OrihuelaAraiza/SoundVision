@@ -13,6 +13,7 @@ struct SoundNodeVisualComponent: Component, Equatable {
     var isSelected: Bool
     var isTriggered: Bool
     var isConnectionSource: Bool
+    var isSoundLocked: Bool
 
     init(node: SoundNode, isSelected: Bool, isTriggered: Bool, isConnectionSource: Bool = false) {
         type = node.type
@@ -22,6 +23,7 @@ struct SoundNodeVisualComponent: Component, Equatable {
         self.isSelected = isSelected
         self.isTriggered = isTriggered
         self.isConnectionSource = isConnectionSource
+        isSoundLocked = node.isSoundLocked
     }
 }
 
@@ -101,6 +103,8 @@ struct NodeAnimationSystem: System {
             let pulse = 1 + Float(sin(time * 1.9)) * 0.09
             connector.scale = SIMD3(repeating: node.isConnectionSource ? 1.55 : pulse)
         }
+
+        entity.findEntity(named: NodeEntityFactory.soundLockName)?.isEnabled = node.isSoundLocked
     }
 
     private func updateMaterials(in root: Entity, node: SoundNodeVisualComponent) {
