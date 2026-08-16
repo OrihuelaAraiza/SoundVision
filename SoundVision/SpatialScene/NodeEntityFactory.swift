@@ -4,6 +4,7 @@ import UIKit
 
 enum NodeEntityFactory {
     static let nodePrefix = "sound-node-"
+    static let connectorName = "node-connector"
 
     static func makeNode(_ node: SoundNode) -> Entity {
         let root = Entity()
@@ -21,9 +22,40 @@ enum NodeEntityFactory {
         root.addChild(WaveformVisualizer.makeWave(for: node.type))
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
+        root.addChild(makeConnector(for: node.type))
         root.addChild(makeSpatialReadout(for: node))
         root.components.set(readoutState(for: node))
         return root
+    }
+
+    /// Punto de salida del que se tira para conectar. Es una pieza propia con su
+    /// collider para poder distinguir "arrastrar el organismo" de "tirar un hilo
+    /// hacia otro organismo" sin modos ni botones.
+    private static func makeConnector(for type: SoundNodeType) -> ModelEntity {
+        let connector = part(
+            connectorName,
+            mesh: .generateSphere(radius: 0.042),
+            material: SoundVisionMaterials.accentGlow(for: type, alpha: 0.9),
+            position: [0, -0.26, 0]
+        )
+        connector.components.set(InputTargetComponent())
+        connector.components.set(HoverEffectComponent())
+        // Blanco de agarre mayor que la esfera visible: con las manos a un metro
+        // la puntería fina es incómoda.
+        connector.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.085)]))
+        return connector
+    }
+
+    /// Distingue el conector del resto del organismo. Se detiene al llegar a la
+    /// raíz del nodo para no confundirlo con piezas de un nodo padre.
+    static func isConnector(_ entity: Entity) -> Bool {
+        var candidate: Entity? = entity
+        while let current = candidate {
+            if current.name == connectorName { return true }
+            if current.name.hasPrefix(nodePrefix) { return false }
+            candidate = current.parent
+        }
+        return false
     }
 
     static func updateSpatialReadout(in root: Entity, node: SoundNode) {

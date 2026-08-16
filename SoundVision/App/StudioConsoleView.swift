@@ -9,9 +9,6 @@ struct StudioConsoleView: View {
     @EnvironmentObject private var state: CompositionState
     let onExit: () -> Void
 
-    @State private var isConfirmingDelete = false
-    @State private var isConfirmingNewTrack = false
-    @State private var isConfirmingDemo = false
 
     var body: some View {
         ScrollView {
@@ -26,36 +23,6 @@ struct StudioConsoleView: View {
             .padding(26)
         }
         .navigationTitle("SoundVision")
-        .confirmationDialog(
-            "¿Eliminar este nodo?",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("Eliminar nodo", role: .destructive) { state.deleteSelectedNode() }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("También se eliminarán todas sus conexiones.")
-        }
-        .confirmationDialog(
-            "¿Comenzar una pista nueva?",
-            isPresented: $isConfirmingNewTrack,
-            titleVisibility: .visible
-        ) {
-            Button("Crear pista nueva", role: .destructive) { state.startNewComposition() }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("La composición actual se quitará del lienzo. Guárdala antes si quieres conservarla.")
-        }
-        .confirmationDialog(
-            "¿Abrir la demo espacial?",
-            isPresented: $isConfirmingDemo,
-            titleVisibility: .visible
-        ) {
-            Button("Abrir demo") { state.loadSpatialTestScene() }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("La demo sustituirá los nodos del lienzo actual.")
-        }
     }
 
     private var header: some View {
@@ -70,6 +37,18 @@ struct StudioConsoleView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            // Siempre disponible mientras haya historial, en vez de un aviso
+            // que se desvanece: si aparece y desaparece, hay que darse prisa.
+            Button { state.undo() } label: {
+                Label(
+                    state.undoLabel.map { "Deshacer \($0.lowercased())" } ?? "Deshacer",
+                    systemImage: "arrow.uturn.backward"
+                )
+                .lineLimit(1)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!state.canUndo)
+
             Button(role: .cancel) { onExit() } label: {
                 Label("Salir", systemImage: "xmark")
             }
@@ -222,17 +201,16 @@ struct StudioConsoleView: View {
 
                 HStack {
                     Button(node.isActive ? "Mutear" : "Activar") { state.toggleSelectedNode() }
-                    if state.pendingConnectionSourceID == node.id {
-                        Button("Cancelar conexión") { state.cancelConnection() }
-                    } else {
-                        Button("Conectar") { state.beginConnection() }
-                    }
                     Spacer()
-                    Button(role: .destructive) { isConfirmingDelete = true } label: {
+                    Button(role: .destructive) { state.deleteSelectedNode() } label: {
                         Image(systemName: "trash")
                     }
                 }
                 .buttonStyle(.bordered)
+
+                Label("Tira del punto bajo el organismo para conectarlo con otro.", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(16)
             .background(.thinMaterial, in: .rect(cornerRadius: 18))
@@ -246,10 +224,10 @@ struct StudioConsoleView: View {
                 .tracking(1.5)
                 .foregroundStyle(.secondary)
             HStack {
-                Button { isConfirmingNewTrack = true } label: {
+                Button { state.startNewComposition() } label: {
                     Label("Nueva pista", systemImage: "doc.badge.plus")
                 }
-                Button { isConfirmingDemo = true } label: {
+                Button { state.loadSpatialTestScene() } label: {
                     Label("Demo", systemImage: "ear.and.waveform")
                 }
                 .tint(.purple)

@@ -12,14 +12,16 @@ struct SoundNodeVisualComponent: Component, Equatable {
     var isActive: Bool
     var isSelected: Bool
     var isTriggered: Bool
+    var isConnectionSource: Bool
 
-    init(node: SoundNode, isSelected: Bool, isTriggered: Bool) {
+    init(node: SoundNode, isSelected: Bool, isTriggered: Bool, isConnectionSource: Bool = false) {
         type = node.type
         position = [node.positionX, node.positionY, node.positionZ]
         rotation = [node.rotationX, node.rotationY, node.rotationZ]
         isActive = node.isActive
         self.isSelected = isSelected
         self.isTriggered = isTriggered
+        self.isConnectionSource = isConnectionSource
     }
 }
 
@@ -91,6 +93,13 @@ struct NodeAnimationSystem: System {
         if let halo = entity.findEntity(named: "selection-halo") {
             halo.isEnabled = node.isSelected
             halo.scale = SIMD3(repeating: node.isSelected ? 1.08 + Float(sin(time * 2.4)) * 0.05 : 1)
+        }
+
+        // El conector late siempre un poco para invitar a tirar de él, y se
+        // agranda mientras el hilo está en el aire.
+        if let connector = entity.findEntity(named: NodeEntityFactory.connectorName) {
+            let pulse = 1 + Float(sin(time * 1.9)) * 0.09
+            connector.scale = SIMD3(repeating: node.isConnectionSource ? 1.55 : pulse)
         }
     }
 

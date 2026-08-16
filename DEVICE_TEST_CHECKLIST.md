@@ -79,14 +79,26 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
 
 ### 5. Composición e interacción
 
-1. En un nodo pulsa **Conectar** y después selecciona otro nodo.
-2. Confirma que aparece la línea y el mensaje `Conexión creada`.
-3. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté detenido.
-4. Crea un nodo desde **Extraer nodo**, muévelo y elimínalo desde el inspector.
-5. Selecciona un nodo detenido: debe mostrar pocas partículas. Al escucharlo,
+1. **Conectar tirando del hilo.** Tira del punto luminoso bajo un organismo:
+   debe salir un hilo que sigue tu mano. Acércalo a otro organismo y confirma
+   que **el destino se ilumina antes de soltar**. Suelta y comprueba la línea.
+2. Repite soltando el hilo en el vacío: no debe crearse nada y debe avisarte.
+3. Comprueba que el punto de conexión se distingue del cuerpo: arrastrar el
+   cuerpo debe **mover** el organismo, no trazar hilo.
+4. **Cortar.** Haz pinch sobre una conexión: debe desaparecer al instante.
+   Pulsa **Deshacer** en la consola y confirma que vuelve.
+5. Deshaz varias veces seguidas (corte, nodo añadido, demo cargada). Cada paso
+   debe revertir **una sola acción**: añadir un nodo y su conexión automática
+   cuenta como una.
+6. Añade ocho nodos, borra dos del medio y añade tres más: **ninguno debe
+   aparecer encima de otro**.
+7. Haz pinch sobre el nodo ya seleccionado: debe soltarse la selección.
+8. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté detenido.
+9. Selecciona un nodo detenido: debe mostrar pocas partículas. Al escucharlo,
    la emisión debe intensificarse y después desaparecer sin quedar residuos.
 
-Registra: gestos fallidos, controles difíciles de alcanzar y desincronización visual.
+Registra: hilos que no enganchan, conexiones difíciles de tocar, y si el radio
+de enganche resulta demasiado corto o demasiado goloso.
 
 ## Criterio de salida
 

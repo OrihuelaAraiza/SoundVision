@@ -11,6 +11,15 @@ struct SoundSculptureView: View {
     @StateObject private var audioEngine = AudioEngineManager()
     @State private var dragOrigins: [UUID: SIMD3<Float>] = [:]
     @State private var rotationOrigins: [UUID: SIMD3<Float>] = [:]
+    @State private var connectionDrag: ConnectionDrag?
+
+    /// Hilo en curso entre el conector de un organismo y el punto donde está la
+    /// mano. Vive en la vista porque solo existe mientras dura el gesto.
+    private struct ConnectionDrag {
+        let sourceID: UUID
+        var endPoint: SIMD3<Float>
+        var candidateID: UUID?
+    }
 
     var body: some View {
         RealityView { content in
@@ -50,6 +59,9 @@ struct SoundSculptureView: View {
             .onEnded { value in
                 if TransportNodeFactory.isTransportEntity(value.entity) {
                     state.togglePlayback()
+                } else if let connectionID = ConnectionLineSystem.id(from: value.entity) {
+                    // Cortar es inmediato: el historial de deshacer lo respalda.
+                    state.removeConnection(id: connectionID)
                 } else if let id = NodeEntityFactory.id(from: value.entity) {
                     state.selectNode(id: id)
                 }
@@ -64,6 +76,18 @@ struct SoundSculptureView: View {
                       let node = state.node(id: id),
                       let root = sculptureRoot(from: value.entity)
                 else { return }
+
+                // Tirar del conector traza un hilo; tirar del cuerpo mueve el
+                // organismo. Un mismo gesto, dos intenciones, sin ningún modo.
+                if connectionDrag?.sourceID == id || NodeEntityFactory.isConnector(value.entity) {
+                    let point = value.convert(value.location3D, from: .local, to: root)
+                    connectionDrag = ConnectionDrag(
+                        sourceID: id,
+                        endPoint: point,
+                        candidateID: state.nearestNode(to: point, excluding: id, within: connectionSnapRadius)
+                    )
+                    return
+                }
 
                 // Conserva el punto de agarre para que el nodo no salte al dedo.
                 let origin: SIMD3<Float>
@@ -80,7 +104,18 @@ struct SoundSculptureView: View {
                 state.moveNode(id: id, to: origin + (current - start))
             }
             .onEnded { value in
-                if let id = NodeEntityFactory.id(from: value.entity) {
+                if let drag = connectionDrag {
+                    connectionDrag = nil
+                    guard let targetID = drag.candidateID else {
+                        state.statusMessage = "Suelta el hilo sobre otro organismo para conectarlo."
+                        return
+                    }
+                    // Nunca dejes el gesto sin respuesta: soltar sobre un
+                    // destino ya conectado debe decirlo, no quedarse callado.
+                    if !state.connect(sourceID: drag.sourceID, destinationID: targetID) {
+                        state.statusMessage = "Esos organismos ya estaban conectados."
+                    }
+                } else if let id = NodeEntityFactory.id(from: value.entity) {
                     dragOrigins[id] = nil
                 } else if TransportNodeFactory.isTransportEntity(value.entity),
                           let root = sculptureRoot(from: value.entity) {
@@ -89,6 +124,10 @@ struct SoundSculptureView: View {
                 }
             }
     }
+
+    /// Radio de enganche del hilo. Generoso a propósito: acertar a un objeto
+    /// pequeño a un metro con la mano cansa.
+    private var connectionSnapRadius: Float { 0.42 }
 
     private var rotationGesture: some Gesture {
         RotateGesture3D()
@@ -180,10 +219,50 @@ struct SoundSculptureView: View {
             NodeEntityFactory.updateSpatialReadout(in: entity, node: node)
             entity.components.set(SoundNodeVisualComponent(
                 node: node,
-                isSelected: state.selectedNodeID == node.id,
-                isTriggered: soundingIDs.contains(node.id)
+                // El candidato a destino se ilumina como si estuviera
+                // seleccionado: dice "suelta aquí" sin necesidad de texto.
+                isSelected: state.selectedNodeID == node.id || connectionDrag?.candidateID == node.id,
+                isTriggered: soundingIDs.contains(node.id),
+                isConnectionSource: connectionDrag?.sourceID == node.id
             ))
         }
+
+        updateTendril(in: root)
+    }
+
+    /// Hilo que sigue la mano mientras se traza una conexión.
+    private func updateTendril(in root: Entity) {
+        let name = "connection-tendril"
+        guard let drag = connectionDrag, let source = state.node(id: drag.sourceID) else {
+            root.findEntity(named: name)?.removeFromParent()
+            return
+        }
+
+        let tendril: ModelEntity
+        if let existing = root.findEntity(named: name) as? ModelEntity {
+            tendril = existing
+        } else {
+            tendril = ModelEntity(
+                mesh: .generateCylinder(height: 1, radius: 0.006),
+                materials: [SoundVisionMaterials.accentGlow(for: source.type, alpha: 0.85)]
+            )
+            tendril.name = name
+            root.addChild(tendril)
+        }
+
+        // Mismo desplazamiento vertical que aplica la animación al organismo,
+        // para que el hilo nazca del conector y no del aire.
+        let verticalOffset = NodeVisualStyle.style(for: source.type).verticalOffset
+        let from = SIMD3<Float>(
+            source.positionX,
+            source.positionY + verticalOffset - 0.26,
+            source.positionZ
+        )
+        let vector = drag.endPoint - from
+        let length = max(simd_length(vector), 0.001)
+        tendril.position = (from + drag.endPoint) / 2
+        tendril.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+        tendril.scale = [drag.candidateID == nil ? 1 : 1.9, length, drag.candidateID == nil ? 1 : 1.9]
     }
 }
 

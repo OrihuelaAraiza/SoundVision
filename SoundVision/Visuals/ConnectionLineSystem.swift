@@ -46,6 +46,14 @@ enum ConnectionLineSystem {
                     materials: [SoundVisionMaterials.connection(for: destination.type, highlighted: false)]
                 )
                 line.name = lineName
+                // Una hebra de 4 mm es imposible de tocar con la mirada. El
+                // collider es una cápsula mucho más ancha; se escala en Y junto
+                // con la línea, así que cubre toda su longitud.
+                line.components.set(InputTargetComponent())
+                line.components.set(HoverEffectComponent())
+                line.components.set(CollisionComponent(
+                    shapes: [.generateCapsule(height: 1, radius: 0.05)]
+                ))
                 container.addChild(line)
             }
 
@@ -58,6 +66,19 @@ enum ConnectionLineSystem {
             line.model?.materials = [SoundVisionMaterials.connection(for: destination.type, highlighted: highlighted)]
             line.isEnabled = destination.isActive
         }
+    }
+
+    /// Identifica la conexión tocada, subiendo por la jerarquía como hacen los
+    /// nodos.
+    static func id(from entity: Entity) -> UUID? {
+        var candidate: Entity? = entity
+        while let current = candidate {
+            if current.name.hasPrefix(prefix) {
+                return UUID(uuidString: String(current.name.dropFirst(prefix.count)))
+            }
+            candidate = current.parent
+        }
+        return nil
     }
 
     private static func position(of node: SoundNode) -> SIMD3<Float> {

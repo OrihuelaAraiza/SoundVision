@@ -59,10 +59,30 @@ Para componer desde cero, pulsa **Nueva pista** y usa **Añadir sonido** en la
 consola. También puedes tirar del núcleo Play dentro del espacio para extraer un
 organismo nuevo en el punto donde sueltes.
 
-Dentro del espacio inmersivo, el pinch selecciona un nodo, arrastrarlo lo mueve
-(conservando el punto de agarre) y girarlo con dos manos ajusta reverb, delay y
-distorsión. Si la consola te estorba, muévela con la barra inferior que le da
-visionOS o ciérrala; la escultura sigue funcionando.
+## Gestos
+
+Todo lo que construye la música se hace con las manos, dentro del espacio:
+
+| Gesto | Resultado |
+|---|---|
+| Pinch sobre un organismo | Lo selecciona. Repetirlo lo suelta. |
+| Arrastrar su cuerpo | Lo mueve: altura → pitch, profundidad → volumen. |
+| **Tirar del punto luminoso de abajo** | **Traza un hilo. Suéltalo sobre otro organismo para conectarlos.** |
+| Pinch sobre una conexión | La corta. |
+| Girar con dos manos | Reverb, delay y distorsión. |
+| Pinch sobre el núcleo Play | Reproduce o detiene. |
+| Tirar del núcleo Play | Extrae un organismo nuevo donde sueltes. |
+
+Conectar no tiene modo ni botón: se tira de un hilo y se suelta donde quieras.
+Mientras el hilo está en el aire, el destino candidato se ilumina, así que sabes
+dónde va a engancharse antes de soltar.
+
+Ninguna acción destructiva pide confirmación. En su lugar, la consola mantiene
+**Deshacer** disponible con el nombre de lo último que hiciste, así que cortar
+una conexión o vaciar el lienzo nunca es un callejón sin salida.
+
+Si la consola te estorba, muévela con la barra inferior que le da visionOS o
+ciérrala; la escultura sigue funcionando.
 
 El simulador valida la escena y la interacción básica. La percepción espacial,
 ergonomía, audio y comodidad deben validarse también en un Apple Vision Pro real.

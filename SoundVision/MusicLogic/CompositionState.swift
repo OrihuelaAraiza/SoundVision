@@ -11,12 +11,12 @@ final class CompositionState: ObservableObject {
     @Published var isImmersiveSpaceOpen = false
     @Published var lastTriggeredNodeIDs: Set<UUID> = []
     @Published var selectedNodeID: UUID?
-    @Published var pendingConnectionSourceID: UUID?
     @Published var statusMessage: String?
     @Published var spatialAudioSession: SpatialAudioSession?
     @Published var isSpatialTestScene = false
     @Published var testStep = 0
     @Published private(set) var sceneContentRevision = 0
+    @Published private(set) var undoLabel: String?
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
@@ -24,6 +24,15 @@ final class CompositionState: ObservableObject {
     private var pulseClearTasks: [UUID: Task<Void, Never>] = [:]
     private var previewClearTask: Task<Void, Never>?
     private var observations = Set<AnyCancellable>()
+    private var undoStack: [UndoEntry] = []
+
+    private struct UndoEntry {
+        let label: String
+        let nodes: [SoundNode]
+        let connections: [SoundConnection]
+        let selectedNodeID: UUID?
+        let isSpatialTestScene: Bool
+    }
 
     init(storage: CompositionStorage = CompositionStorage()) {
         self.storage = storage
@@ -44,12 +53,40 @@ final class CompositionState: ObservableObject {
         nodes.first { $0.id == id }
     }
 
+    /// Tocar el nodo ya seleccionado lo suelta. Sin esto no había forma de
+    /// quedarse sin selección desde dentro del espacio.
     func selectNode(id: UUID) {
-        if let sourceID = pendingConnectionSourceID, sourceID != id {
-            connect(sourceID: sourceID, destinationID: id)
-            pendingConnectionSourceID = nil
-        }
-        selectedNodeID = id
+        selectedNodeID = selectedNodeID == id ? nil : id
+    }
+
+    // MARK: - Deshacer
+
+    var canUndo: Bool { !undoStack.isEmpty }
+
+    /// Toda acción que destruye o crea estructura deja un punto de retorno, de
+    /// modo que ningún borrado necesita un diálogo de confirmación previo.
+    private func recordUndo(_ label: String) {
+        undoStack.append(UndoEntry(
+            label: label,
+            nodes: nodes,
+            connections: connections,
+            selectedNodeID: selectedNodeID,
+            isSpatialTestScene: isSpatialTestScene
+        ))
+        if undoStack.count > 24 { undoStack.removeFirst() }
+        undoLabel = label
+    }
+
+    func undo() {
+        guard let entry = undoStack.popLast() else { return }
+        stopPlayback()
+        nodes = entry.nodes
+        connections = entry.connections
+        selectedNodeID = entry.selectedNodeID
+        isSpatialTestScene = entry.isSpatialTestScene
+        undoLabel = undoStack.last?.label
+        sceneContentRevision &+= 1
+        statusMessage = "Se deshizo: \(entry.label.lowercased())."
     }
 
     func toggleSelectedNode() {
@@ -59,35 +96,47 @@ final class CompositionState: ObservableObject {
 
     func clearSelection() {
         selectedNodeID = nil
-        pendingConnectionSourceID = nil
-    }
-
-    func cancelConnection() {
-        pendingConnectionSourceID = nil
-        statusMessage = "Conexión cancelada."
     }
 
     func deleteSelectedNode() {
-        guard let id = selectedNodeID else { return }
+        guard let id = selectedNodeID, let node = node(id: id) else { return }
+        recordUndo("Eliminar \(node.name)")
         stopPlayback()
         nodes.removeAll { $0.id == id }
         connections.removeAll { $0.sourceNodeID == id || $0.destinationNodeID == id }
         selectedNodeID = nil
-        pendingConnectionSourceID = nil
         sceneContentRevision &+= 1
-        statusMessage = "Nodo eliminado."
+        statusMessage = "\(node.name) eliminado."
     }
 
-    func beginConnection() {
-        pendingConnectionSourceID = selectedNodeID
-        statusMessage = selectedNodeID == nil ? "Selecciona primero un nodo." : "Selecciona el nodo destino."
+    func removeConnection(id: UUID) {
+        guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("Cortar conexión")
+        let destinationID = connections[index].destinationNodeID
+        stopPlayback()
+        connections.remove(at: index)
+        recalculateDurationSummary(for: destinationID)
+        statusMessage = "Conexión cortada."
     }
 
-    func connect(sourceID: UUID?, destinationID: UUID) {
-        guard sourceID != destinationID,
-              !connections.contains(where: { $0.sourceNodeID == sourceID && $0.destinationNodeID == destinationID })
-        else { return }
+    @discardableResult
+    func connect(sourceID: UUID?, destinationID: UUID) -> Bool {
+        guard canConnect(sourceID: sourceID, destinationID: destinationID) else { return false }
+        recordUndo("Crear conexión")
+        appendConnection(sourceID: sourceID, destinationID: destinationID)
+        statusMessage = "Conexión creada."
+        return true
+    }
 
+    private func canConnect(sourceID: UUID?, destinationID: UUID) -> Bool {
+        sourceID != destinationID
+            && !connections.contains { $0.sourceNodeID == sourceID && $0.destinationNodeID == destinationID }
+            && position(of: destinationID) != nil
+    }
+
+    /// Alta sin punto de retorno propio: `createNode` ya registró el suyo y una
+    /// sola acción del usuario debe deshacerse de una sola vez.
+    private func appendConnection(sourceID: UUID?, destinationID: UUID) {
         let sourcePosition = sourceID.flatMap(position(of:)) ?? Self.playNodePosition
         guard let destinationPosition = position(of: destinationID) else { return }
         connections.append(SoundConnection(
@@ -96,7 +145,17 @@ final class CompositionState: ObservableObject {
             durationBeats: SpatialParameterMapper.durationBeats(from: sourcePosition, to: destinationPosition)
         ))
         recalculateDurationSummary(for: destinationID)
-        statusMessage = "Conexión creada."
+    }
+
+    /// Destino más cercano al punto donde se soltó el hilo. El radio generoso
+    /// evita exigir puntería fina con las manos a un metro de distancia.
+    func nearestNode(to point: SIMD3<Float>, excluding excludedID: UUID?, within radius: Float) -> UUID? {
+        nodes
+            .filter { $0.id != excludedID }
+            .map { ($0.id, simd_distance(point, [$0.positionX, $0.positionY, $0.positionZ])) }
+            .filter { $0.1 <= radius }
+            .min { $0.1 < $1.1 }?
+            .0
     }
 
     @discardableResult
@@ -111,13 +170,8 @@ final class CompositionState: ObservableObject {
         at position: SIMD3<Float>? = nil,
         connectedFrom sourceID: UUID? = nil
     ) -> UUID {
-        let spawnIndex = Float(nodes.count)
-        let defaultPosition = SIMD3<Float>(
-            0.48 + cos(spawnIndex * 1.4) * 0.5,
-            SpatialParameterMapper.neutralHeight + sin(spawnIndex * 0.8) * 0.15,
-            sin(spawnIndex * 1.4) * 0.42
-        )
-        let finalPosition = clamped(position ?? defaultPosition)
+        let finalPosition = clamped(position ?? freeSpawnPosition())
+        recordUndo("Añadir \(SoundNodeType.displayName(for: type))")
         let node = SoundNode(
             name: SoundNodeType.displayName(for: type),
             type: type,
@@ -128,7 +182,9 @@ final class CompositionState: ObservableObject {
             positionZ: finalPosition.z
         )
         nodes.append(node)
-        connect(sourceID: sourceID, destinationID: node.id)
+        if canConnect(sourceID: sourceID, destinationID: node.id) {
+            appendConnection(sourceID: sourceID, destinationID: node.id)
+        }
         selectedNodeID = node.id
         sceneContentRevision &+= 1
         statusMessage = "\(SoundNodeType.displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
@@ -219,6 +275,7 @@ final class CompositionState: ObservableObject {
     }
 
     func loadSpatialTestScene() {
+        recordUndo("Abrir demo")
         stopPlayback()
         sequencer.bpm = 92
         graphTransport.loopPasses = 2
@@ -241,7 +298,6 @@ final class CompositionState: ObservableObject {
         ]
         recalculateAllConnections()
         selectedNodeID = kick.id
-        pendingConnectionSourceID = nil
         isSpatialTestScene = true
         testStep = 0
         sceneContentRevision &+= 1
@@ -264,7 +320,8 @@ final class CompositionState: ObservableObject {
         "Pulsa Play. Debes oír Kick al frente y FX detrás; gira la cabeza para confirmar la localización.",
         "Selecciona Bass o Hi-hat y pulsa Escuchar. Compara izquierda y derecha sin mover el nodo.",
         "Arrastra un nodo arriba/abajo y cerca/lejos. Repite Escuchar para comprobar pitch, volumen y distancia.",
-        "Rota Pad o FX y escucha reverb, delay y distorsión. Después crea una conexión nueva entre dos nodos.",
+        "Rota Pad o FX y escucha reverb, delay y distorsión.",
+        "Tira del punto luminoso bajo un organismo y suelta el hilo sobre otro para conectarlos. Toca una conexión para cortarla.",
         "Detén, vuelve a reproducir y comprueba que controles, ondas y audio permanecen sincronizados."
     ]
 
@@ -290,6 +347,7 @@ final class CompositionState: ObservableObject {
     func load() {
         do {
             let composition = try storage.load()
+            recordUndo("Cargar composición")
             stopPlayback()
             sequencer.bpm = composition.bpm
             nodes = composition.nodes
@@ -297,7 +355,6 @@ final class CompositionState: ObservableObject {
                 ? composition.nodes.map { SoundConnection(sourceNodeID: nil, destinationNodeID: $0.id) }
                 : composition.connections
             selectedNodeID = nil
-            pendingConnectionSourceID = nil
             recalculateAllConnections()
             sceneContentRevision &+= 1
             statusMessage = "Composición espacial cargada."
@@ -312,12 +369,12 @@ final class CompositionState: ObservableObject {
     }
 
     func startNewComposition(message: String = "Nueva pista lista. Elige un sonido del cajón para comenzar.") {
+        if !nodes.isEmpty { recordUndo("Vaciar el lienzo") }
         stopPlayback()
         nodes = []
         connections = []
         lastTriggeredNodeIDs = []
         selectedNodeID = nil
-        pendingConnectionSourceID = nil
         statusMessage = message
         isSpatialTestScene = false
         testStep = 0
@@ -370,6 +427,33 @@ final class CompositionState: ObservableObject {
 
     private func position(of nodeID: UUID) -> SIMD3<Float>? {
         nodes.first(where: { $0.id == nodeID }).map { [$0.positionX, $0.positionY, $0.positionZ] }
+    }
+
+    /// Busca el hueco más despejado en un anillo alrededor del núcleo. La
+    /// versión anterior derivaba la posición de `nodes.count`, así que tras
+    /// borrar un nodo los siguientes reaparecían encima de los que quedaban.
+    private func freeSpawnPosition() -> SIMD3<Float> {
+        let radius: Float = 0.95
+        let heights: [Float] = [0.24, 0, -0.22]
+        var best = SIMD3<Float>(0, SpatialParameterMapper.neutralHeight, radius * 0.6)
+        var bestClearance = -Float.infinity
+
+        for step in 0..<18 {
+            let angle = Float(step) / 18 * 2 * .pi
+            let candidate = SIMD3<Float>(
+                sin(angle) * radius,
+                SpatialParameterMapper.neutralHeight + heights[step % heights.count],
+                cos(angle) * radius * 0.6
+            )
+            let clearance = nodes
+                .map { simd_distance(candidate, [$0.positionX, $0.positionY, $0.positionZ]) }
+                .min() ?? .greatestFiniteMagnitude
+            if clearance > bestClearance {
+                bestClearance = clearance
+                best = candidate
+            }
+        }
+        return best
     }
 
     private func clamped(_ value: SIMD3<Float>) -> SIMD3<Float> {

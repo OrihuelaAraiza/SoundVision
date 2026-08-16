@@ -1,3 +1,4 @@
+import simd
 import XCTest
 @testable import SoundVision
 
@@ -151,6 +152,102 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertEqual(moved.positionY, 1.9, accuracy: 0.001)
         XCTAssertEqual(moved.pitch, SpatialParameterMapper.pitch(forHeight: 1.9), accuracy: 0.001)
         XCTAssertEqual(moved.volume, SpatialParameterMapper.volume(forDepth: 0.8), accuracy: 0.001)
+    }
+
+    /// Añadir un nodo crea también su conexión con Play, pero eso fue **una**
+    /// acción del usuario y debe deshacerse de una sola vez.
+    @MainActor
+    func testUndoRemovesNodeAndItsAutomaticConnectionTogether() {
+        let state = CompositionState()
+        XCTAssertFalse(state.canUndo)
+
+        state.createNode(of: .kick)
+        XCTAssertEqual(state.nodes.count, 1)
+        XCTAssertEqual(state.connections.count, 1)
+        XCTAssertTrue(state.canUndo)
+
+        state.undo()
+        XCTAssertEqual(state.nodes.count, 0)
+        XCTAssertEqual(state.connections.count, 0)
+        XCTAssertFalse(state.canUndo)
+    }
+
+    @MainActor
+    func testCuttingAConnectionIsUndoable() {
+        let state = CompositionState()
+        let source = state.createNode(of: .kick)
+        let destination = state.createNode(of: .bass)
+        XCTAssertTrue(state.connect(sourceID: source, destinationID: destination))
+
+        let connectionCount = state.connections.count
+        guard let cut = state.connections.last?.id else { return XCTFail("Sin conexión que cortar") }
+        state.removeConnection(id: cut)
+        XCTAssertEqual(state.connections.count, connectionCount - 1)
+
+        state.undo()
+        XCTAssertEqual(state.connections.count, connectionCount)
+        XCTAssertTrue(state.connections.contains { $0.id == cut })
+    }
+
+    @MainActor
+    func testUndoRestoresTheCanvasAfterLoadingTheDemo() {
+        let state = CompositionState()
+        state.createNode(of: .pad)
+        let ownNodes = state.nodes
+
+        state.loadSpatialTestScene()
+        XCTAssertEqual(state.nodes.count, 5)
+        XCTAssertTrue(state.isSpatialTestScene)
+
+        state.undo()
+        XCTAssertEqual(state.nodes, ownNodes)
+        XCTAssertFalse(state.isSpatialTestScene)
+    }
+
+    /// La colocación automática solía derivarse de `nodes.count`, así que tras
+    /// borrar un nodo los siguientes reaparecían encima de los supervivientes.
+    @MainActor
+    func testAutomaticPlacementKeepsNodesApartAfterDeletions() {
+        let state = CompositionState()
+        for _ in 0..<5 { state.createNode(of: .kick) }
+
+        state.selectedNodeID = state.nodes[2].id
+        state.deleteSelectedNode()
+        state.createNode(of: .snare)
+        state.createNode(of: .hiHat)
+
+        let positions = state.nodes.map { SIMD3<Float>($0.positionX, $0.positionY, $0.positionZ) }
+        for (index, position) in positions.enumerated() {
+            for other in positions[(index + 1)...] {
+                XCTAssertGreaterThan(
+                    simd_distance(position, other), 0.2,
+                    "Dos organismos quedaron prácticamente encima"
+                )
+            }
+        }
+    }
+
+    /// Tocar el nodo ya seleccionado debe soltarlo.
+    @MainActor
+    func testTappingTheSelectedNodeAgainDeselectsIt() {
+        let state = CompositionState()
+        let id = state.createNode(of: .lead)
+
+        state.selectNode(id: id)
+        XCTAssertNil(state.selectedNodeID)
+        state.selectNode(id: id)
+        XCTAssertEqual(state.selectedNodeID, id)
+    }
+
+    @MainActor
+    func testNearestNodeHonoursRadiusAndExclusion() {
+        let state = CompositionState()
+        let origin = state.createNode(of: .kick, at: [0, 1.25, 0])
+        let near = state.createNode(of: .bass, at: [0.25, 1.25, 0])
+
+        XCTAssertEqual(state.nearestNode(to: [0.3, 1.25, 0], excluding: origin, within: 0.42), near)
+        XCTAssertNil(state.nearestNode(to: [2.2, 1.25, 0], excluding: origin, within: 0.42))
+        XCTAssertNil(state.nearestNode(to: [0.02, 1.25, 0], excluding: origin, within: 0.1))
     }
 
     @MainActor
