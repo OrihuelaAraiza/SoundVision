@@ -109,6 +109,11 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
 3d. **Tocar sigue seleccionando.** Haz un pinch limpio sobre un nodo: debe
    seleccionarse. Ahora muévelo de verdad y suéltalo: debe quedar
    **seleccionado**, no deseleccionado por el gesto.
+3f. **Síntesis en vivo.** Con la música **sonando**, arrastra un organismo tonal
+   (Pad, Bass, Lead) hacia arriba: su nota debe subir **mientras suena**,
+   deslizándose hasta la nueva altura sin chasquidos. Acércalo y aléjalo: el
+   volumen debe seguir la mano. Gíralo: reverb, delay y distorsión deben
+   moverse en vivo. Nada de esto debe esperar a la siguiente reproducción.
 3e. **Play sin congelón.** Con ocho organismos bien separados (notas largas),
    pulsa Reproducir: no debe haber pausa perceptible entre el toque y el sonido.
 3b. **Fluidez al arrastrar.** Mueve un nodo sin soltar durante varios segundos:

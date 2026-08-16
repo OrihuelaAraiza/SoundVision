@@ -76,6 +76,18 @@ quedar a +7.3 semitonos y la pieza entera sonaba microtonal por muy buena que
 fuese la síntesis. La pentatónica es la escala en la que casi cualquier
 combinación suena bien junta, así que colocar organismos a ojo produce música.
 
+**La síntesis es en tiempo real.** Mover un organismo mientras la música suena
+cambia su afinación al instante, deslizándose hasta la nueva nota en vez de
+saltar. Girarlo barre sus efectos en vivo. Una versión anterior horneaba cada
+nota entera al pulsar Play, lo que hacía imposible por construcción que la mano
+afectara a lo que ya estaba sonando: el sonido ya estaba escrito.
+
+El motor vive en [RealtimeVoice.swift](SoundVision/Audio/RealtimeVoice.swift) y
+respeta las reglas del hilo de audio: ni una asignación, ni un lock, ni una
+llamada transcendental por muestra. Fases, línea de delay y tiempos de ataque
+ocupan memoria reservada una sola vez, y los parámetros vivos cruzan desde el
+hilo principal como escalares independientes que se leen una vez por bloque.
+
 La distancia horizontal gobierna las dos caras del tiempo: cuándo entra el
 siguiente organismo y cuánto sostiene el anterior. Separar dos organismos alarga
 la nota; juntarlos la vuelve staccato. Los percusivos son la excepción: un golpe

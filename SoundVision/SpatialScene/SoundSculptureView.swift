@@ -30,6 +30,12 @@ struct SoundSculptureView: View {
             audioEngine.retireSourcesIfNeeded(for: state.spatialAudioSession)
             reconcileNodes(in: root)
             audioEngine.synchronize(session: state.spatialAudioSession, in: root)
+            // Lo que la mano acaba de cambiar llega a las voces que ya suenan:
+            // con la síntesis en tiempo real, mover un organismo se oye ya.
+            audioEngine.updateLiveParameters(
+                nodes: state.nodes,
+                sustainBeats: state.sustainBeatsByNode()
+            )
             syncVisualState(in: root)
             reportAudioProblem()
         }

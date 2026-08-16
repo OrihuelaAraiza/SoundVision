@@ -1,3 +1,4 @@
+import AVFAudio
 import XCTest
 @testable import SoundVision
 
@@ -60,77 +61,171 @@ final class MusicalMappingTests: XCTestCase {
         XCTAssertEqual(near, far)
     }
 
-    func testBakedDurationIsCappedForVeryDistantNodes() {
-        let duration = VoiceSynthesis.duration(for: .pad, sustainSeconds: 60)
-        XCTAssertLessThanOrEqual(duration, VoiceSynthesis.maximumDuration)
+    func testSustainIsCappedForVeryDistantNodes() {
+        XCTAssertLessThanOrEqual(
+            VoiceSynthesis.duration(for: .pad, sustainSeconds: 60),
+            VoiceSynthesis.maximumDuration
+        )
     }
 
-    // MARK: - Síntesis
+    // MARK: - Síntesis en tiempo real
 
     func testEveryInstrumentProducesSound() {
         for type in SoundNodeType.allCases {
-            let node = SoundNode(name: "x", type: type, positionX: 0, positionY: 1.25, positionZ: 0)
-            let samples = VoiceSynthesis.bake(node: node, sustainSeconds: 1, sampleRate: 48_000)
-            XCTAssertFalse(samples.isEmpty, "\(type) no produjo muestras")
-            XCTAssertTrue(samples.contains { $0 != 0 }, "\(type) salió en silencio")
+            let output = AudioProbe.render(node: node(type), blocks: 12)
+            XCTAssertTrue(output.contains { $0 != 0 }, "\(type) salió en silencio")
             XCTAssertTrue(
-                samples.allSatisfy { $0.isFinite && abs($0) <= 1.05 },
+                output.allSatisfy { $0.isFinite && abs($0) <= 0.9 },
                 "\(type) produjo muestras fuera de rango o no finitas"
             )
         }
     }
 
-    /// Ninguna nota debe cortarse de golpe, o se oye un clic al final. El
-    /// arranque es otra historia: un percusivo *tiene* que entrar de golpe, y
-    /// solo los tonales suben por su envolvente de ataque.
+    /// Ninguna nota debe cortarse de golpe. Un percusivo *tiene* que entrar de
+    /// golpe, así que solo los tonales suben por su envolvente de ataque.
     func testNotesEndSilentlyAndTonalOnesFadeIn() {
         for type in SoundNodeType.allCases {
-            let node = SoundNode(name: "x", type: type, positionX: 0, positionY: 1.25, positionZ: 0)
-            let samples = VoiceSynthesis.bake(node: node, sustainSeconds: 0.8, sampleRate: 48_000)
-
-            XCTAssertLessThan(abs(samples[samples.count - 1]), 0.05, "\(type) corta de golpe")
+            let output = AudioProbe.render(node: node(type), heldSeconds: 0.3, blocks: 90)
+            XCTAssertLessThan(abs(output[output.count - 1]), 0.05, "\(type) corta de golpe")
             if !VoiceSynthesis.isPercussive(type) {
-                XCTAssertLessThan(abs(samples[0]), 0.05, "\(type) arranca con un salto")
+                XCTAssertLessThan(abs(output[0]), 0.05, "\(type) arranca con un salto")
             }
         }
     }
 
     func testHigherPitchProducesFasterOscillation() {
-        let low = SoundNode(name: "low", type: .lead, pitch: -12, positionX: 0, positionY: 1.25, positionZ: 0)
-        let high = SoundNode(name: "high", type: .lead, pitch: 12, positionX: 0, positionY: 1.25, positionZ: 0)
+        let low = AudioProbe.render(node: node(.lead, pitch: -12), blocks: 20)
+        let high = AudioProbe.render(node: node(.lead, pitch: 12), blocks: 20)
+        XCTAssertGreaterThan(zeroCrossings(high), zeroCrossings(low))
+    }
+
+    // MARK: - Lo que justifica el motor en tiempo real
+
+    /// El punto de todo el rediseño: mover un organismo mientras suena debe
+    /// cambiar su altura ya, no en la siguiente reproducción. Con la síntesis
+    /// horneada esto era imposible por construcción.
+    func testMovingANodeChangesPitchWhileItIsStillSounding() {
+        let renderer = AudioProbe.renderer(node: node(.pad, pitch: 0), heldSeconds: 4)
+        let before = AudioProbe.drain(renderer, blocks: 24)
+
+        var moved = node(.pad, pitch: 24)
+        moved.positionY = 2.2
+        renderer.parameters.update(from: moved, heldSeconds: 4)
+
+        // Deja pasar el deslizamiento antes de medir el resultado.
+        _ = AudioProbe.drain(renderer, blocks: 40)
+        let after = AudioProbe.drain(renderer, blocks: 24)
 
         XCTAssertGreaterThan(
-            zeroCrossings(VoiceSynthesis.bake(node: high, sustainSeconds: 0.5, sampleRate: 48_000)),
-            zeroCrossings(VoiceSynthesis.bake(node: low, sustainSeconds: 0.5, sampleRate: 48_000))
+            zeroCrossings(after), zeroCrossings(before) * 2,
+            "Subir dos octavas debe oírse de inmediato"
         )
     }
 
-    /// La tabla de seno sustituyó a `sin()` para que pulsar Play no congele la
-    /// interfaz. Debe seguir siendo un seno, no una escalera.
-    func testSineTableMatchesTheRealSine() {
-        let node = SoundNode(name: "x", type: .bass, positionX: 0, positionY: 1.25, positionZ: 0)
-        let samples = VoiceSynthesis.bake(node: node, sustainSeconds: 0.4, sampleRate: 48_000)
+    /// Ese cambio tiene que deslizarse, no saltar: un salto de fase se oye como
+    /// un chasquido en mitad de la nota.
+    func testLivePitchChangeDoesNotClick() {
+        let renderer = AudioProbe.renderer(node: node(.bass, pitch: 0), heldSeconds: 4)
+        _ = AudioProbe.drain(renderer, blocks: 30)
 
-        // Una onda de 55 Hz muestreada a 48 kHz cruza el cero unas dos veces por
-        // ciclo; una tabla rota o mal indexada rompería esa cuenta de inmediato.
-        let crossings = zeroCrossings(samples)
-        XCTAssertGreaterThan(crossings, 20)
-        XCTAssertLessThan(crossings, 400)
-        XCTAssertTrue(samples.allSatisfy { $0.isFinite })
+        renderer.parameters.update(from: node(.bass, pitch: 24), heldSeconds: 4)
+        let during = AudioProbe.drain(renderer, blocks: 20)
+
+        let biggestJump = zip(during, during.dropFirst())
+            .map { abs($1 - $0) }
+            .max() ?? 0
+        XCTAssertLessThan(biggestJump, 0.25, "La transición de altura produjo un salto audible")
     }
 
-    /// Hornear al pulsar Play no puede costar un congelón perceptible.
-    func testBakingAFullCompositionStaysFast() {
+    func testLiveDistortionChangesTheWaveformWithoutBlowingUp() {
+        let renderer = AudioProbe.renderer(node: node(.lead, pitch: 0), heldSeconds: 4)
+        _ = AudioProbe.drain(renderer, blocks: 20)
+
+        var distorted = node(.lead, pitch: 0)
+        distorted.distortion = 1
+        renderer.parameters.update(from: distorted, heldSeconds: 4)
+        let after = AudioProbe.drain(renderer, blocks: 60)
+
+        XCTAssertTrue(after.allSatisfy { $0.isFinite && abs($0) <= 0.9 })
+        XCTAssertTrue(after.contains { $0 != 0 })
+    }
+
+    /// El hilo de audio no puede permitirse el coste de la versión horneada.
+    func testRenderingIsFastEnoughForRealtime() {
+        let renderer = AudioProbe.renderer(node: node(.pad, pitch: 0), heldSeconds: 4)
+        let blocks = 400
         let start = Date()
-        for type in SoundNodeType.allCases {
-            let node = SoundNode(name: "x", type: type, positionX: 0, positionY: 1.25, positionZ: 0)
-            _ = VoiceSynthesis.bake(node: node, sustainSeconds: 4.0, sampleRate: 48_000)
-        }
+        _ = AudioProbe.drain(renderer, blocks: blocks)
         let elapsed = Date().timeIntervalSince(start)
-        XCTAssertLessThan(elapsed, 1.0, "Hornear ocho voces largas tardó \(elapsed) s")
+
+        // 400 bloques de 512 frames son ~4.3 s de audio: generarlos debe costar
+        // una fracción mínima de ese tiempo.
+        XCTAssertLessThan(elapsed, 1.0, "Sintetizar 4 s de audio tardó \(elapsed) s")
+    }
+
+    // MARK: - Utilidades
+
+    private func node(_ type: SoundNodeType, pitch: Float = 0) -> SoundNode {
+        SoundNode(name: "\(type)", type: type, pitch: pitch, positionX: 0, positionY: 1.25, positionZ: 0)
     }
 
     private func zeroCrossings(_ samples: [Float]) -> Int {
         zip(samples, samples.dropFirst()).count { ($0 < 0) != ($1 < 0) }
+    }
+}
+
+/// Ejecuta el callback de audio real, igual que lo haría RealityKit.
+enum AudioProbe {
+    static let frameCount: AUAudioFrameCount = 512
+
+    static func renderer(
+        node: SoundNode,
+        heldSeconds: TimeInterval = 1,
+        attacks: [UInt64]? = nil
+    ) -> SpatialVoiceRenderer {
+        SpatialVoiceRenderer(
+            node: node,
+            sustainSeconds: heldSeconds,
+            attackHostTimes: attacks ?? [mach_absolute_time()]
+        )
+    }
+
+    static func render(node: SoundNode, heldSeconds: TimeInterval = 1, blocks: Int) -> [Float] {
+        drain(renderer(node: node, heldSeconds: heldSeconds), blocks: blocks)
+    }
+
+    /// Bloques consecutivos con el reloj interno del renderizador, que avanza
+    /// exactamente un bloque cada vez: da una línea de tiempo determinista.
+    static func drain(_ renderer: SpatialVoiceRenderer, blocks: Int) -> [Float] {
+        var output: [Float] = []
+        output.reserveCapacity(blocks * Int(frameCount))
+        for _ in 0..<blocks {
+            output.append(contentsOf: renderOneBlock(renderer))
+        }
+        return output
+    }
+
+    private static func renderOneBlock(_ renderer: SpatialVoiceRenderer) -> [Float] {
+        let count = Int(frameCount)
+        let samples = UnsafeMutablePointer<Float>.allocate(capacity: count)
+        samples.initialize(repeating: 0, count: count)
+        defer { samples.deallocate() }
+
+        let bufferList = AudioBufferList.allocate(maximumBuffers: 1)
+        defer { free(bufferList.unsafeMutablePointer) }
+        bufferList[0] = AudioBuffer(
+            mNumberChannels: 1,
+            mDataByteSize: frameCount * UInt32(MemoryLayout<Float>.size),
+            mData: UnsafeMutableRawPointer(samples)
+        )
+
+        // Sin host time válido: el renderizador usa su contador interno, que
+        // avanza un bloque por llamada.
+        var stamp = AudioTimeStamp()
+        var isSilence = ObjCBool(true)
+        _ = withUnsafePointer(to: &stamp) { stampPointer in
+            renderer.render(&isSilence, stampPointer, frameCount, bufferList.unsafeMutablePointer)
+        }
+        return Array(UnsafeBufferPointer(start: samples, count: count))
     }
 }

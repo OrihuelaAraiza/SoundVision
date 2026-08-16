@@ -44,6 +44,10 @@ final class AudioEngineManager: ObservableObject {
     private var sessionID: UUID?
     private var controllers: [AudioGeneratorController] = []
     private var renderers: [SpatialVoiceRenderer] = []
+    /// Índices para poder empujar parámetros vivos a la voz de cada organismo.
+    private var voicesByNode: [UUID: SpatialVoiceRenderer] = [:]
+    private var entitiesByNode: [UUID: Entity] = [:]
+    private var secondsPerBeat: Double = 0.5
     private var attachFailure: String?
 
     /// Resumen legible del estado real del motor. Devuelve `nil` cuando todo va
@@ -76,6 +80,7 @@ final class AudioEngineManager: ObservableObject {
         guard let session else { return }
         sessionID = session.id
         attachFailure = nil
+        secondsPerBeat = session.secondsPerBeat
 
         let nodesByID = Dictionary(uniqueKeysWithValues: session.nodes.map { ($0.id, $0) })
         let eventsByNode = Dictionary(grouping: session.events, by: \.nodeID)
@@ -108,6 +113,8 @@ final class AudioEngineManager: ObservableObject {
                 controller.play()
                 controllers.append(controller)
                 renderers.append(renderer)
+                voicesByNode[nodeID] = renderer
+                entitiesByNode[nodeID] = entity
             } catch {
                 attachFailure = error.localizedDescription
                 print("SoundVision RealityKit spatial audio: \(error.localizedDescription)")
@@ -119,8 +126,35 @@ final class AudioEngineManager: ObservableObject {
         controllers.forEach { $0.stop() }
         controllers = []
         renderers = []
+        voicesByNode = [:]
+        entitiesByNode = [:]
         sessionID = nil
         attachFailure = nil
+    }
+
+    /// Empuja a las voces vivas lo que la mano acaba de cambiar. Es lo que hace
+    /// que mover un organismo mientras suena se oiga al instante en vez de
+    /// esperar a la siguiente reproducción.
+    func updateLiveParameters(nodes: [SoundNode], sustainBeats: [UUID: Double]) {
+        guard !voicesByNode.isEmpty else { return }
+        for node in nodes {
+            if let entity = entitiesByNode[node.id] {
+                // Volumen y reverb los aplica RealityKit, no el sintetizador.
+                entity.spatialAudio = spatialConfiguration(for: node)
+            }
+            guard let voice = voicesByNode[node.id] else { continue }
+            voice.parameters.update(
+                from: node,
+                heldSeconds: heldSeconds(for: node, sustainBeats: sustainBeats)
+            )
+        }
+    }
+
+    private func heldSeconds(for node: SoundNode, sustainBeats: [UUID: Double]) -> Double {
+        let beats = sustainBeats[node.id] ?? 1.2
+        let seconds = beats * secondsPerBeat
+        let release = VoiceSynthesis.spec(for: node.type).release
+        return min(max(seconds, 0.18), VoiceSynthesis.maximumDuration - release)
     }
 
     private func spatialConfiguration(for node: SoundNode) -> SpatialAudioComponent {
@@ -135,134 +169,4 @@ final class AudioEngineManager: ObservableObject {
             distanceAttenuation: .rolloff(factor: 0.9)
         )
     }
-}
-
-/// Renderizador sin locks ni asignaciones en el audio thread. Todas las notas
-/// se evalúan contra host time, de modo que ramas distintas comparten ataques
-/// sample-accurate aunque cada entidad tenga su propio generador.
-final class SpatialVoiceRenderer: @unchecked Sendable {
-    private let attackSeconds: [TimeInterval]
-    private let sampleRate = 48_000.0
-    private let soundDuration: TimeInterval
-    private let samples: [Float]
-
-    /// Reloj propio, usado cuando el timestamp del host no sirve. Solo lo toca
-    /// el hilo de audio, un bloque después de otro.
-    private var anchorSeconds: TimeInterval = -1
-    private var renderedFrames: Double = 0
-    private var resolvedClock: Clock = .undecided
-
-    enum Clock { case undecided, hostTimestamp, internalCounter }
-
-    /// Diagnóstico para la UI: sin esto, "no suena" es indistinguible de "las
-    /// voces nunca llegaron a engancharse".
-    private(set) var didRenderAudibleSample = false
-
-    init(node: SoundNode, sustainSeconds: TimeInterval? = nil, attackHostTimes: [UInt64]) {
-        // Ordenados para poder acotar por búsqueda binaria qué ataques pueden
-        // sonar en un bloque concreto, en vez de recorrerlos todos por frame.
-        attackSeconds = attackHostTimes.map(AVAudioTime.seconds(forHostTime:)).sorted()
-        soundDuration = VoiceSynthesis.duration(for: node.type, sustainSeconds: sustainSeconds)
-        samples = VoiceSynthesis.bake(
-            node: node,
-            sustainSeconds: sustainSeconds,
-            sampleRate: 48_000
-        )
-    }
-
-    var render: Audio.GeneratorRenderHandler {
-        // `isSilence` es parte del contrato, no un parámetro ignorable: quien
-        // consume el buffer puede descartarlo si queda marcado como silencio.
-        // El código anterior nunca lo tocaba.
-        { [unowned self] isSilence, timestamp, frameCount, audioBufferList in
-            let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let blockStart = self.blockStartSeconds(from: timestamp.pointee)
-            let blockEnd = blockStart + Double(frameCount) / sampleRate
-            defer { renderedFrames += Double(frameCount) }
-
-            // Solo los ataques cuya cola alcanza este bloque pueden aportar
-            // muestras. Recorrer la línea de tiempo completa por frame costaba
-            // cientos de miles de iteraciones por bloque y provocaba cortes.
-            let lower = lowerBound(for: blockStart - soundDuration)
-            let upper = lowerBound(for: blockEnd)
-            guard lower < upper else {
-                for buffer in buffers {
-                    guard let data = buffer.mData else { continue }
-                    memset(data, 0, Int(buffer.mDataByteSize))
-                }
-                isSilence.pointee = true
-                return noErr
-            }
-            isSilence.pointee = false
-
-            for buffer in buffers {
-                guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                for frame in 0..<Int(frameCount) {
-                    let absoluteTime = blockStart + Double(frame) / sampleRate
-                    var mixedSample: Float = 0
-                    for index in lower..<upper {
-                        let localTime = absoluteTime - attackSeconds[index]
-                        guard localTime >= 0, localTime < soundDuration else { continue }
-                        let sampleIndex = min(samples.count - 1, Int(localTime * sampleRate))
-                        mixedSample += samples[sampleIndex]
-                    }
-                    if mixedSample != 0 { didRenderAudibleSample = true }
-                    data[frame] = max(-0.78, min(mixedSample * 0.9, 0.78))
-                }
-            }
-
-            return noErr
-        }
-    }
-
-    /// Decide una sola vez de qué reloj fiarse y se mantiene en él.
-    ///
-    /// El diseño original daba por hecho que `mHostTime` venía poblado y en el
-    /// mismo reloj `mach_absolute_time()` que los ataques. Cuando no es así, los
-    /// ataques quedan fuera de toda ventana y la salida es silencio total, sin
-    /// error ni pista alguna. Ahora se verifica y, si no cuadra, se lleva un
-    /// contador de muestras propio anclado al reloj mach.
-    private func blockStartSeconds(from stamp: AudioTimeStamp) -> TimeInterval {
-        let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-
-        if resolvedClock == .undecided {
-            let hostSeconds = AVAudioTime.seconds(forHostTime: stamp.mHostTime)
-            let isValid = stamp.mFlags.contains(.hostTimeValid)
-                && stamp.mHostTime != 0
-                // Mismo epoch: un timestamp del reloj de audio o a cero se
-                // delataría por estar a años de distancia del reloj mach.
-                && abs(hostSeconds - now) < 1.0
-            resolvedClock = isValid ? .hostTimestamp : .internalCounter
-            if resolvedClock == .internalCounter {
-                anchorSeconds = now
-                renderedFrames = 0
-            }
-        }
-
-        switch resolvedClock {
-        case .hostTimestamp:
-            return AVAudioTime.seconds(forHostTime: stamp.mHostTime)
-        case .internalCounter, .undecided:
-            return anchorSeconds + renderedFrames / sampleRate
-        }
-    }
-
-    var usesFallbackClock: Bool { resolvedClock == .internalCounter }
-
-    /// Primer índice cuyo ataque es >= `time`. Sin asignaciones ni locks, apto
-    /// para el hilo de audio.
-    private func lowerBound(for time: TimeInterval) -> Int {
-        var low = 0
-        var high = attackSeconds.count
-        while low < high {
-            let middle = (low + high) / 2
-            if attackSeconds[middle] < time {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
-        return low
-    }
-
 }
