@@ -17,11 +17,13 @@ struct SoundSculptureView: View {
 
     var body: some View {
         RealityView { content in
-            let sculpture = makeSculpture()
-            scene.adopt(root: sculpture)
-            content.add(sculpture)
+            content.add(makeSculpture())
         } update: { content in
-            guard let root = scene.root else { return }
+            // Derivada del contenido, no guardada al construir: si el estado de
+            // la vista se reinicia, una raíz nula dejaba todos los gestos
+            // muertos y la escena sin actualizar.
+            guard let root = content.entities.first(where: { $0.name == sculptureName }) else { return }
+            scene.adopt(root: root)
             // El orden importa en ambos extremos: las fuentes viejas se detienen
             // antes de que sus entidades desaparezcan, y las nuevas se adjuntan
             // solo después de que la escena las haya creado.
@@ -72,7 +74,7 @@ struct SoundSculptureView: View {
         DragGesture(minimumDistance: 8)
             .targetedToAnyEntity()
             .onChanged { value in
-                guard let root = scene.root,
+                guard let root = sculptureRoot(from: value.entity),
                       let id = NodeEntityFactory.id(from: value.entity),
                       let node = state.node(id: id)
                 else { return }
@@ -95,7 +97,24 @@ struct SoundSculptureView: View {
                     state.selectedNodeID = id
                 }
                 let start = value.convert(value.startLocation3D, from: .local, to: root)
-                state.moveNode(id: id, to: origin + (current - start))
+                let target = state.clampedPosition(origin + (current - start))
+
+                // La entidad sigue la mano en cada frame, pero el estado
+                // observado solo se confirma 20 veces por segundo: publicar a
+                // 90 Hz reconstruía la consola entera (con sus sliders) tantas
+                // veces por segundo que dejaba de responder y de hacer scroll.
+                scene.setLivePosition(target, for: id, in: root)
+                ConnectionLineSystem.updateGeometry(
+                    in: root,
+                    movedNodeID: id,
+                    livePosition: target,
+                    nodes: state.nodes,
+                    connections: state.connections
+                )
+                if scene.shouldCommitDrag(at: CACurrentMediaTime()) {
+                    state.moveNode(id: id, to: target)
+                }
+                scene.pendingDragTarget = target
             }
             .onEnded { value in
                 if let sourceID = scene.connectionSourceID {
@@ -114,12 +133,32 @@ struct SoundSculptureView: View {
                         state.statusMessage = "Esos organismos ya estaban conectados."
                     }
                 } else if let id = NodeEntityFactory.id(from: value.entity) {
+                    // Confirma la posición final aunque el acelerador se la
+                    // hubiera saltado.
+                    if let target = scene.pendingDragTarget {
+                        state.moveNode(id: id, to: target)
+                    }
                     scene.dragOrigins[id] = nil
-                } else if TransportNodeFactory.isTransportEntity(value.entity), let root = scene.root {
+                    scene.pendingDragTarget = nil
+                } else if TransportNodeFactory.isTransportEntity(value.entity),
+                          let root = sculptureRoot(from: value.entity) {
                     // Extraer un organismo nuevo tirando del núcleo Play.
                     state.createNextNode(at: value.convert(value.location3D, from: .local, to: root))
                 }
             }
+    }
+
+    private var sculptureName: String { "sound-sculpture" }
+
+    /// Sube por la jerarquía hasta la raíz de la escultura. Derivarla de la
+    /// entidad tocada no puede fallar, a diferencia de guardarla al construir.
+    private func sculptureRoot(from entity: Entity) -> Entity? {
+        var candidate: Entity? = entity
+        while let current = candidate {
+            if current.name == sculptureName { return current }
+            candidate = current.parent
+        }
+        return nil
     }
 
     /// Radio de enganche del hilo. Generoso a propósito: acertar a un objeto
@@ -154,7 +193,7 @@ struct SoundSculptureView: View {
 
     private func makeSculpture() -> Entity {
         let root = Entity()
-        root.name = "sound-sculpture"
+        root.name = sculptureName
         // Las coordenadas musicales ya expresan alturas humanas (neutral = 1.25 m).
         root.position = SpatialSceneLayout.rootPosition
         root.addChild(ConnectionLineSystem.makeContainer())
@@ -204,16 +243,23 @@ struct SoundSculptureView: View {
         for node in state.nodes {
             // Búsqueda en diccionario, no recorrido recursivo del árbol: esto
             // corría por cada nodo en cada pasada de actualización.
-            guard let entity = scene.nodeEntities[node.id] else { continue }
+            guard let entity = scene.entity(for: node.id, in: root) else { continue }
             NodeEntityFactory.updateSpatialReadout(in: entity, node: node, at: now)
-            entity.components.set(SoundNodeVisualComponent(
+            var component = SoundNodeVisualComponent(
                 node: node,
                 // El candidato a destino se ilumina como si estuviera
                 // seleccionado: dice "suelta aquí" sin necesidad de texto.
                 isSelected: state.selectedNodeID == node.id || scene.tendrilCandidateID == node.id,
                 isTriggered: sounding.contains(node.id),
                 isConnectionSource: scene.connectionSourceID == node.id
-            ))
+            )
+            // Un nodo en pleno arrastre manda sobre el estado: su posición la
+            // escribe el gesto a frame rate y el estado va detrás.
+            if scene.dragOrigins[node.id] != nil,
+               let live = entity.components[SoundNodeVisualComponent.self] {
+                component.position = live.position
+            }
+            entity.components.set(component)
         }
     }
 
@@ -336,8 +382,11 @@ private final class SculptureBridge {
     var tendrilCandidateID: UUID?
     var tendril: ModelEntity?
     var soundingIDs: Set<UUID> = []
+    var pendingDragTarget: SIMD3<Float>?
+    private var lastDragCommit: TimeInterval = -.infinity
 
     func adopt(root: Entity) {
+        guard self.root !== root else { return }
         self.root = root
         transport = root.findEntity(named: TransportNodeFactory.rootName)
         rebuildNodeIndex(from: root)
@@ -350,6 +399,31 @@ private final class SculptureBridge {
             guard let id = UUID(uuidString: raw) else { continue }
             nodeEntities[id] = child
         }
+    }
+
+    /// Caché que se repara sola. Una entrada perdida antes dejaba al nodo sin
+    /// actualizarse en absoluto; ahora se vuelve a buscar y se guarda.
+    func entity(for id: UUID, in root: Entity) -> Entity? {
+        if let cached = nodeEntities[id], cached.parent != nil { return cached }
+        guard let found = root.findEntity(named: NodeEntityFactory.nodePrefix + id.uuidString) else { return nil }
+        nodeEntities[id] = found
+        return found
+    }
+
+    /// Mueve la entidad ya, sin esperar a que el estado observado se ponga al día.
+    func setLivePosition(_ position: SIMD3<Float>, for id: UUID, in root: Entity) {
+        guard let entity = entity(for: id, in: root),
+              var component = entity.components[SoundNodeVisualComponent.self]
+        else { return }
+        component.position = position
+        entity.components.set(component)
+    }
+
+    /// Limita a 20 Hz la publicación del arrastre hacia SwiftUI.
+    func shouldCommitDrag(at time: TimeInterval) -> Bool {
+        guard time - lastDragCommit >= 0.05 else { return false }
+        lastDragCommit = time
+        return true
     }
 }
 

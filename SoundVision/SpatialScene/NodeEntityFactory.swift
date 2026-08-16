@@ -23,6 +23,7 @@ enum NodeEntityFactory {
         root.addChild(WaveformVisualizer.makeWave(for: node.type))
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
+        root.addChild(makeConnectorStem(for: node.type))
         root.addChild(makeConnector(for: node.type))
         root.addChild(makeSoundLockPlinth())
         root.addChild(makeSpatialReadout(for: node))
@@ -47,6 +48,20 @@ enum NodeEntityFactory {
         connector.components.set(HoverEffectComponent())
         connector.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.075)]))
         return connector
+    }
+
+    /// Tallo hasta el conector. Separarlo del cuerpo resolvió los agarres
+    /// equivocados, pero a esa distancia un punto suelto ya no se lee como parte
+    /// del organismo; el tallo restituye esa relación. Sin collider, para no
+    /// volver a competir con el cuerpo.
+    private static func makeConnectorStem(for type: SoundNodeType) -> ModelEntity {
+        let stem = ModelEntity(
+            mesh: .generateCylinder(height: 0.17, radius: 0.005),
+            materials: [SoundVisionMaterials.accentGlow(for: type, alpha: 0.45)]
+        )
+        stem.name = "node-connector-stem"
+        stem.position = [0, -0.25, 0]
+        return stem
     }
 
     /// Pedestal que aparece bajo el organismo cuando su sonido está fijo. La

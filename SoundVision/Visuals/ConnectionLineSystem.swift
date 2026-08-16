@@ -81,6 +81,43 @@ enum ConnectionLineSystem {
         }
     }
 
+    /// Recoloca en vivo las líneas que tocan un organismo en pleno arrastre.
+    /// El estado observado solo se confirma 20 veces por segundo; sin esto, las
+    /// conexiones irían visiblemente por detrás de la mano.
+    static func updateGeometry(
+        in root: Entity,
+        movedNodeID: UUID,
+        livePosition: SIMD3<Float>,
+        nodes: [SoundNode],
+        connections: [SoundConnection]
+    ) {
+        guard let container = root.findEntity(named: containerName) else { return }
+        let nodeMap = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+
+        func endpoint(_ id: UUID) -> SIMD3<Float>? {
+            guard let node = nodeMap[id] else { return nil }
+            let base = id == movedNodeID
+                ? livePosition
+                : SIMD3<Float>(node.positionX, node.positionY, node.positionZ)
+            return [base.x, base.y + NodeVisualStyle.style(for: node.type).verticalOffset, base.z]
+        }
+
+        for connection in connections
+        where connection.sourceNodeID == movedNodeID || connection.destinationNodeID == movedNodeID {
+            guard let line = container.findEntity(named: prefix + connection.id.uuidString) as? ModelEntity,
+                  let destination = endpoint(connection.destinationNodeID)
+            else { continue }
+            let source = connection.sourceNodeID.flatMap(endpoint) ?? CompositionState.playNodePosition
+            let vector = destination - source
+            let length = max(simd_length(vector), 0.001)
+            let thickness = line.components[ConnectionLineComponent.self]?.isHighlighted == true ? Float(1.8) : 1
+
+            line.position = (source + destination) / 2
+            line.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+            line.scale = [thickness, length, thickness]
+        }
+    }
+
     /// Resalta las líneas de los nodos que suenan sin reconstruir geometría ni
     /// tocar el estado observado: cada nota redibujaba antes toda la interfaz.
     static func applyTriggerHighlights(in root: Entity, triggeredIDs: Set<UUID>) {

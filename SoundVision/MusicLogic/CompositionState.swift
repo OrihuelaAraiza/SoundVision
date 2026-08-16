@@ -512,6 +512,12 @@ final class CompositionState: ObservableObject {
         return best
     }
 
+    /// Mismos límites que aplica `moveNode`, expuestos para que un arrastre
+    /// pueda mover la entidad a frame rate sin desviarse de donde acabará.
+    func clampedPosition(_ value: SIMD3<Float>) -> SIMD3<Float> {
+        clamped(value)
+    }
+
     private func clamped(_ value: SIMD3<Float>) -> SIMD3<Float> {
         [
             max(-2.4, min(value.x, 2.4)),

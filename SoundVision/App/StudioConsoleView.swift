@@ -10,19 +10,47 @@ struct StudioConsoleView: View {
     let onExit: () -> Void
 
 
+    /// Todo cabía en una sola columna con scroll, pero creció hasta no caber en
+    /// la ventana, y entre botones y sliders de ancho completo casi no quedaba
+    /// zona neutra donde agarrar para desplazarla. En pestañas cada pantalla es
+    /// corta y no depende del scroll para alcanzar nada.
     var body: some View {
+        TabView {
+            Tab("Reproducir", systemImage: "play.circle") {
+                page { transportSection; if state.isSpatialTestScene { guideSection } }
+            }
+            Tab("Sonidos", systemImage: "square.grid.2x2") {
+                page { instrumentSection; compositionSection }
+            }
+            Tab("Nodo", systemImage: "slider.horizontal.3") {
+                page {
+                    if state.selectedNode == nil {
+                        ContentUnavailableView(
+                            "Ningún organismo seleccionado",
+                            systemImage: "hand.tap",
+                            description: Text("Haz pinch sobre un organismo en el espacio para editarlo aquí.")
+                        )
+                    } else {
+                        inspectorSection
+                    }
+                }
+            }
+        }
+        .navigationTitle("SoundVision")
+    }
+
+    /// Encabezado común más el contenido de la pestaña. El scroll se conserva
+    /// como red de seguridad, no como la vía principal para llegar a las cosas.
+    @ViewBuilder
+    private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 header
-                transportSection
-                if state.isSpatialTestScene { guideSection }
-                instrumentSection
-                if state.selectedNode != nil { inspectorSection }
-                compositionSection
+                content()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(26)
         }
-        .navigationTitle("SoundVision")
     }
 
     private var header: some View {

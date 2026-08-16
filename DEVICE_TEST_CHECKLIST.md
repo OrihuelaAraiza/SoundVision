@@ -13,7 +13,16 @@
 
 ## Recorrido de 10 minutos
 
-### 0. Altura, consola y cambio de modo
+### 0. Consola por pestañas
+
+1. La consola tiene tres pestañas: **Reproducir**, **Sonidos** y **Nodo**.
+   Confirma que en cada una **todo cabe sin tener que desplazar**.
+2. Selecciona un organismo y ve a **Nodo**: debe mostrar su inspector. Sin
+   selección, debe explicar cómo seleccionar uno en vez de quedarse en blanco.
+3. **Mientras arrastras un nodo con una mano**, pulsa botones y cambia de
+   pestaña con la otra: la consola debe seguir respondiendo a la primera.
+
+### 1. Altura, consola y cambio de modo
 
 1. Confirma que Play y los nodos aparecen aproximadamente a la altura del torso,
    no sobre el suelo.
