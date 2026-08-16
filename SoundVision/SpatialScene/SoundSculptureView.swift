@@ -59,6 +59,11 @@ struct SoundSculptureView: View {
         TapGesture()
             .targetedToAnyEntity()
             .onEnded { value in
+                // Tras arrastrar, SwiftUI puede entregar también el tap. Como
+                // tocar el nodo ya seleccionado lo suelta, mover un organismo
+                // acababa deseleccionándolo y vaciando la pestaña Nodo.
+                guard !scene.isSettlingAfterDrag(at: CACurrentMediaTime()) else { return }
+
                 if TransportNodeFactory.isTransportEntity(value.entity) {
                     state.togglePlayback()
                 } else if let connectionID = ConnectionLineSystem.id(from: value.entity) {
@@ -94,10 +99,15 @@ struct SoundSculptureView: View {
                 let origin = scene.dragOrigins[id] ?? [node.positionX, node.positionY, node.positionZ]
                 if scene.dragOrigins[id] == nil {
                     scene.dragOrigins[id] = origin
+                    // Referencia tomada aquí, no en `startLocation3D`: el gesto
+                    // no engancha hasta recorrer la distancia mínima, así que
+                    // medir desde el inicio real hacía saltar el nodo esa
+                    // distancia de golpe en cuanto empezaba a moverse.
+                    scene.dragReferences[id] = current
                     state.selectedNodeID = id
                 }
-                let start = value.convert(value.startLocation3D, from: .local, to: root)
-                let target = state.clampedPosition(origin + (current - start))
+                let reference = scene.dragReferences[id] ?? current
+                let target = state.clampedPosition(origin + (current - reference))
 
                 // La entidad sigue la mano en cada frame, pero el estado
                 // observado solo se confirma 20 veces por segundo: publicar a
@@ -121,6 +131,7 @@ struct SoundSculptureView: View {
                     let candidate = scene.tendrilCandidateID
                     scene.connectionSourceID = nil
                     scene.tendrilCandidateID = nil
+                    scene.noteDragEnded(at: CACurrentMediaTime())
                     clearTendril()
 
                     guard let targetID = candidate else {
@@ -137,8 +148,15 @@ struct SoundSculptureView: View {
                     // hubiera saltado.
                     if let target = scene.pendingDragTarget {
                         state.moveNode(id: id, to: target)
+                        // Solo un desplazamiento real suprime el tap posterior.
+                        // Suprimirlo siempre haría que un toque con un temblor
+                        // de mano dejara de seleccionar el organismo.
+                        if let origin = scene.dragOrigins[id], simd_distance(origin, target) > 0.02 {
+                            scene.noteDragEnded(at: CACurrentMediaTime())
+                        }
                     }
                     scene.dragOrigins[id] = nil
+                    scene.dragReferences[id] = nil
                     scene.pendingDragTarget = nil
                 } else if TransportNodeFactory.isTransportEntity(value.entity),
                           let root = sculptureRoot(from: value.entity) {
@@ -383,7 +401,9 @@ private final class SculptureBridge {
     var tendril: ModelEntity?
     var soundingIDs: Set<UUID> = []
     var pendingDragTarget: SIMD3<Float>?
+    var dragReferences: [UUID: SIMD3<Float>] = [:]
     private var lastDragCommit: TimeInterval = -.infinity
+    private var lastDragEnd: TimeInterval = -.infinity
 
     func adopt(root: Entity) {
         guard self.root !== root else { return }
@@ -417,6 +437,15 @@ private final class SculptureBridge {
         else { return }
         component.position = position
         entity.components.set(component)
+    }
+
+    func noteDragEnded(at time: TimeInterval) {
+        lastDragEnd = time
+    }
+
+    /// Ventana corta tras soltar en la que se ignoran los taps.
+    func isSettlingAfterDrag(at time: TimeInterval) -> Bool {
+        time - lastDragEnd < 0.3
     }
 
     /// Limita a 20 Hz la publicación del arrastre hacia SwiftUI.

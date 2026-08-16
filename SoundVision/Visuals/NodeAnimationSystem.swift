@@ -101,7 +101,10 @@ struct NodeAnimationSystem: System {
         // agranda mientras el hilo está en el aire.
         if let connector = entity.findEntity(named: NodeEntityFactory.connectorName) {
             let pulse = 1 + Float(sin(time * 1.9)) * 0.09
-            connector.scale = SIMD3(repeating: node.isConnectionSource ? 1.55 : pulse)
+            // Crece al seleccionar el organismo: una vez que ya lo elegiste,
+            // tirar del hilo es lo siguiente que vas a querer hacer.
+            let emphasis: Float = node.isConnectionSource ? 1.55 : (node.isSelected ? 1.3 : pulse)
+            connector.scale = SIMD3(repeating: emphasis)
         }
 
         entity.findEntity(named: NodeEntityFactory.soundLockName)?.isEnabled = node.isSoundLocked

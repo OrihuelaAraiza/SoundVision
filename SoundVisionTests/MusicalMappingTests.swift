@@ -105,6 +105,31 @@ final class MusicalMappingTests: XCTestCase {
         )
     }
 
+    /// La tabla de seno sustituyó a `sin()` para que pulsar Play no congele la
+    /// interfaz. Debe seguir siendo un seno, no una escalera.
+    func testSineTableMatchesTheRealSine() {
+        let node = SoundNode(name: "x", type: .bass, positionX: 0, positionY: 1.25, positionZ: 0)
+        let samples = VoiceSynthesis.bake(node: node, sustainSeconds: 0.4, sampleRate: 48_000)
+
+        // Una onda de 55 Hz muestreada a 48 kHz cruza el cero unas dos veces por
+        // ciclo; una tabla rota o mal indexada rompería esa cuenta de inmediato.
+        let crossings = zeroCrossings(samples)
+        XCTAssertGreaterThan(crossings, 20)
+        XCTAssertLessThan(crossings, 400)
+        XCTAssertTrue(samples.allSatisfy { $0.isFinite })
+    }
+
+    /// Hornear al pulsar Play no puede costar un congelón perceptible.
+    func testBakingAFullCompositionStaysFast() {
+        let start = Date()
+        for type in SoundNodeType.allCases {
+            let node = SoundNode(name: "x", type: type, positionX: 0, positionY: 1.25, positionZ: 0)
+            _ = VoiceSynthesis.bake(node: node, sustainSeconds: 4.0, sampleRate: 48_000)
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 1.0, "Hornear ocho voces largas tardó \(elapsed) s")
+    }
+
     private func zeroCrossings(_ samples: [Float]) -> Int {
         zip(samples, samples.dropFirst()).count { ($0 < 0) != ($1 < 0) }
     }

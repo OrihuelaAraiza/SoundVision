@@ -111,7 +111,7 @@ enum VoiceSynthesis {
             let time = Double(index) / sampleRate
             var sample: Float = 0
             for (multiple, amplitude) in spec.partials {
-                sample += Float(sin(2 * .pi * frequency * multiple * time)) * amplitude
+                sample += sine(cycles: frequency * multiple * time) * amplitude
             }
             sample /= weight
 
@@ -171,11 +171,11 @@ enum VoiceSynthesis {
             case .kick:
                 // El barrido de tono es lo que da el golpe en el pecho.
                 let swept = frequency * (1 + 3.2 * exp(-time / 0.028))
-                let body = Float(sin(2 * .pi * swept * time))
+                let body = sine(cycles: swept * time)
                 buffer[index] = body * Float(exp(-time / 0.11))
 
             case .snare:
-                let body = Float(sin(2 * .pi * frequency * time)) * 0.35
+                let body = sine(cycles: frequency * time) * 0.35
                 lowpass += lowCoefficient * (noise - lowpass)
                 buffer[index] = (body + lowpass * 0.6) * Float(exp(-time / 0.055))
 
@@ -245,6 +245,27 @@ enum VoiceSynthesis {
         case .lead: 440
         case .fx: 330
         }
+    }
+
+    private static let tableSize = 4_096
+    private static let tableMask = tableSize - 1
+
+    /// Tabla de seno con interpolación lineal. Hornear una voz tonal de varios
+    /// segundos con cinco armónicos son millones de `sin()`, y eso ocurría en el
+    /// hilo principal justo al pulsar Play: era un congelón visible al arrancar.
+    private static let sineTable: [Float] = (0..<tableSize).map {
+        Float(sin(2 * .pi * Double($0) / Double(tableSize)))
+    }
+
+    /// `cycles` va en vueltas completas, no en radianes.
+    private static func sine(cycles: Double) -> Float {
+        let wrapped = cycles - floor(cycles)
+        let position = wrapped * Double(tableSize)
+        let index = Int(position)
+        let fraction = Float(position - Double(index))
+        let current = sineTable[index & tableMask]
+        let next = sineTable[(index + 1) & tableMask]
+        return current + (next - current) * fraction
     }
 
     private static func onePole(cutoff: Double, sampleRate: Double) -> Float {

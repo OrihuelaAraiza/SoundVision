@@ -104,6 +104,13 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
 3. Comprueba que el punto de conexión se distingue del cuerpo: arrastrar el
    cuerpo debe **mover** el organismo, no trazar hilo. Prueba especialmente con
    `Pad` y `Lead`, cuyos cuerpos son los más grandes.
+3a. **Arranque del arrastre.** Empieza a mover un nodo despacio: debe salir
+   siguiendo la mano desde el primer instante, **sin pegar un salto inicial**.
+3d. **Tocar sigue seleccionando.** Haz un pinch limpio sobre un nodo: debe
+   seleccionarse. Ahora muévelo de verdad y suéltalo: debe quedar
+   **seleccionado**, no deseleccionado por el gesto.
+3e. **Play sin congelón.** Con ocho organismos bien separados (notas largas),
+   pulsa Reproducir: no debe haber pausa perceptible entre el toque y el sonido.
 3b. **Fluidez al arrastrar.** Mueve un nodo sin soltar durante varios segundos:
    debe seguir la mano sin tirones. Mientras tanto, pulsa un botón de la consola
    con la otra mano: debe responder a la primera.
