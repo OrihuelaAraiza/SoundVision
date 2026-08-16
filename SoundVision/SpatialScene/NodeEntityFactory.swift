@@ -38,13 +38,14 @@ enum NodeEntityFactory {
             connectorName,
             mesh: .generateSphere(radius: 0.042),
             material: SoundVisionMaterials.accentGlow(for: type, alpha: 0.9),
-            position: [0, -0.26, 0]
+            // Bien despejado del cuerpo. A -0.26 el collider invadía el Pad
+            // (atmósfera de 0.22) y el Lead (haz de 0.44), así que al intentar
+            // mover esos organismos se agarraba el conector y salía un hilo.
+            position: [0, -0.34, 0]
         )
         connector.components.set(InputTargetComponent())
         connector.components.set(HoverEffectComponent())
-        // Blanco de agarre mayor que la esfera visible: con las manos a un metro
-        // la puntería fina es incómoda.
-        connector.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.085)]))
+        connector.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.075)]))
         return connector
     }
 
@@ -56,7 +57,7 @@ enum NodeEntityFactory {
             materials: [UnlitMaterial(color: UIColor.white.withAlphaComponent(0.34))]
         )
         plinth.name = soundLockName
-        plinth.position = [0, -0.33, 0]
+        plinth.position = [0, -0.44, 0]
         plinth.isEnabled = false
         return plinth
     }
@@ -73,14 +74,24 @@ enum NodeEntityFactory {
         return false
     }
 
-    static func updateSpatialReadout(in root: Entity, node: SoundNode) {
+    /// Regenerar la etiqueta cuesta un teselado de fuente en el hilo principal.
+    /// Antes se disparaba con cada 1 % de volumen, es decir prácticamente en
+    /// cada frame de un arrastre: era la causa principal de que la app se
+    /// trabara y de que la consola perdiera pulsaciones. Ahora el valor va en
+    /// pasos gruesos y además no se reconstruye más de ~8 veces por segundo.
+    static func updateSpatialReadout(in root: Entity, node: SoundNode, at time: TimeInterval) {
         let expectedState = readoutState(for: node)
-        guard root.components[NodeReadoutStateComponent.self] != expectedState else { return }
+        let previous = root.components[NodeReadoutStateComponent.self]
+        guard previous != expectedState else { return }
+        guard time - (previous?.renderedAt ?? -.infinity) >= 0.125 else { return }
+
         for child in root.children where child.name.hasPrefix("node-readout-") {
             child.removeFromParent()
         }
         root.addChild(makeSpatialReadout(for: node))
-        root.components.set(expectedState)
+        var stamped = expectedState
+        stamped.renderedAt = time
+        root.components.set(stamped)
     }
 
     private static func visualParts(for type: SoundNodeType, surface: RealityKit.Material) -> [ModelEntity] {
@@ -185,7 +196,9 @@ enum NodeEntityFactory {
     private static func readoutState(for node: SoundNode) -> NodeReadoutStateComponent {
         NodeReadoutStateComponent(
             pitch: Int(node.pitch.rounded()),
-            volume: Int((node.volume * 100).rounded()),
+            // Pasos de 5 %: la etiqueta es informativa, no un instrumento de
+            // medida, y cada escalón cuesta reconstruir la malla de texto.
+            volume: Int((node.volume * 20).rounded()) * 5,
             isActive: node.isActive
         )
     }
@@ -206,4 +219,11 @@ private struct NodeReadoutStateComponent: Component, Equatable {
     var pitch: Int
     var volume: Int
     var isActive: Bool
+    /// Cuándo se tesela por última vez. Fuera de `==` a propósito: marca el
+    /// ritmo de reconstrucción, no forma parte de la identidad del contenido.
+    var renderedAt: TimeInterval = 0
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.pitch == rhs.pitch && lhs.volume == rhs.volume && lhs.isActive == rhs.isActive
+    }
 }

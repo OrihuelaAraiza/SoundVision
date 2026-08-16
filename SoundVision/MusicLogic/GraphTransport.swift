@@ -11,11 +11,9 @@ struct GraphPlaybackEvent: Equatable, Sendable {
 @MainActor
 final class GraphTransport: ObservableObject {
     @Published private(set) var isPlaying = false
-    @Published private(set) var activeNodeIDs: Set<UUID> = []
     @Published var loopPasses = 2
 
     private var visualTasks: [Task<Void, Never>] = []
-    private var activeTokens: [UUID: Set<UUID>] = [:]
     private var completion: (() -> Void)?
 
     @discardableResult
@@ -44,23 +42,13 @@ final class GraphTransport: ObservableObject {
         for event in timeline {
             guard let node = nodesByID[event.nodeID] else { continue }
             let delay = visualLeadIn + event.beat * secondsPerBeat
-            let token = UUID()
+            // El destello lo sostiene quien recibe `onVisualTrigger`; llevar
+            // aquí un segundo conjunto de nodos activos duplicaba ese trabajo y
+            // publicaba un cambio por nota, reevaluando toda la interfaz.
             visualTasks.append(Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(delay))
-                guard let self, self.isPlaying, !Task.isCancelled else { return }
-                if node.isActive {
-                    self.activeTokens[node.id, default: []].insert(token)
-                    self.activeNodeIDs.insert(node.id)
-                    onVisualTrigger(node)
-                }
-
-                try? await Task.sleep(for: .milliseconds(280))
-                guard !Task.isCancelled else { return }
-                self.activeTokens[node.id]?.remove(token)
-                if self.activeTokens[node.id]?.isEmpty != false {
-                    self.activeTokens[node.id] = nil
-                    self.activeNodeIDs.remove(node.id)
-                }
+                guard let self, self.isPlaying, !Task.isCancelled, node.isActive else { return }
+                onVisualTrigger(node)
             })
         }
 
@@ -76,8 +64,6 @@ final class GraphTransport: ObservableObject {
     func stop() {
         visualTasks.forEach { $0.cancel() }
         visualTasks = []
-        activeTokens = [:]
-        activeNodeIDs = []
         isPlaying = false
         completion = nil
     }
@@ -149,8 +135,6 @@ final class GraphTransport: ObservableObject {
     private func finishPlayback() {
         visualTasks.forEach { $0.cancel() }
         visualTasks = []
-        activeTokens = [:]
-        activeNodeIDs = []
         isPlaying = false
         let callback = completion
         completion = nil

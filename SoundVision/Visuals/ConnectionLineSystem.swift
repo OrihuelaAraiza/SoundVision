@@ -1,6 +1,15 @@
 import Foundation
 import RealityKit
 
+/// Datos que la línea necesita para poder resaltarse sin volver a consultar la
+/// composición. Permite que los destellos de reproducción se apliquen directo a
+/// las entidades, sin pasar por SwiftUI.
+struct ConnectionLineComponent: Component {
+    var destinationID: UUID
+    var type: SoundNodeType
+    var isHighlighted: Bool
+}
+
 enum ConnectionLineSystem {
     static let containerName = "energy-connections"
     static let prefix = "connection-"
@@ -18,7 +27,7 @@ enum ConnectionLineSystem {
         triggeredIDs: Set<UUID>
     ) {
         guard let container = root.findEntity(named: containerName) else { return }
-        let revision = revision(nodes: nodes, connections: connections, triggeredIDs: triggeredIDs)
+        let revision = revision(nodes: nodes, connections: connections)
         guard container.components[ConnectionRevisionComponent.self]?.value != revision else { return }
         container.components.set(ConnectionRevisionComponent(value: revision))
 
@@ -60,12 +69,40 @@ enum ConnectionLineSystem {
             let vector = destinationPosition - sourcePosition
             let length = max(simd_length(vector), 0.001)
             line.position = (sourcePosition + destinationPosition) / 2
-            line.orientation = simd_quatf(from: [0, 1, 0], to: simd_normalize(vector))
-            let highlighted = triggeredIDs.contains(destination.id)
-            line.scale = [highlighted ? 1.8 : 1, length, highlighted ? 1.8 : 1]
-            line.model?.materials = [SoundVisionMaterials.connection(for: destination.type, highlighted: highlighted)]
+            line.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+            line.scale = [1, length, 1]
             line.isEnabled = destination.isActive
+            line.components.set(ConnectionLineComponent(
+                destinationID: destination.id,
+                type: destination.type,
+                isHighlighted: false
+            ))
+            setHighlight(triggeredIDs.contains(destination.id), on: line)
         }
+    }
+
+    /// Resalta las líneas de los nodos que suenan sin reconstruir geometría ni
+    /// tocar el estado observado: cada nota redibujaba antes toda la interfaz.
+    static func applyTriggerHighlights(in root: Entity, triggeredIDs: Set<UUID>) {
+        guard let container = root.findEntity(named: containerName) else { return }
+        for child in container.children {
+            guard let line = child as? ModelEntity,
+                  let info = line.components[ConnectionLineComponent.self]
+            else { continue }
+            setHighlight(triggeredIDs.contains(info.destinationID), on: line)
+        }
+    }
+
+    private static func setHighlight(_ highlighted: Bool, on line: ModelEntity) {
+        guard var info = line.components[ConnectionLineComponent.self],
+              info.isHighlighted != highlighted
+        else { return }
+        info.isHighlighted = highlighted
+        line.components.set(info)
+
+        let thickness: Float = highlighted ? 1.8 : 1
+        line.scale = [thickness, line.scale.y, thickness]
+        line.model?.materials = [SoundVisionMaterials.connection(for: info.type, highlighted: highlighted)]
     }
 
     /// Identifica la conexión tocada, subiendo por la jerarquía como hacen los
@@ -86,11 +123,9 @@ enum ConnectionLineSystem {
         return [node.positionX, node.positionY + style.verticalOffset, node.positionZ]
     }
 
-    private static func revision(
-        nodes: [SoundNode],
-        connections: [SoundConnection],
-        triggeredIDs: Set<UUID>
-    ) -> Int {
+    /// Solo geometría y pertenencia. Los destellos quedan fuera a propósito:
+    /// entraban en el hash y obligaban a rehacer este cálculo en cada nota.
+    private static func revision(nodes: [SoundNode], connections: [SoundConnection]) -> Int {
         var hasher = Hasher()
         for node in nodes {
             hasher.combine(node.id)
@@ -103,9 +138,6 @@ enum ConnectionLineSystem {
             hasher.combine(connection.id)
             hasher.combine(connection.sourceNodeID)
             hasher.combine(connection.destinationNodeID)
-        }
-        for id in triggeredIDs.sorted(by: { $0.uuidString < $1.uuidString }) {
-            hasher.combine(id)
         }
         return hasher.finalize()
     }

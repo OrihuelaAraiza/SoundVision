@@ -207,6 +207,8 @@ struct StudioConsoleView: View {
                 }
                 .tint(.cyan)
 
+                positionControls(for: node)
+
                 parameter("Altura · Pitch", value: String(format: "%+.1f st", node.pitch))
                 parameter("Profundidad · Volumen", value: "\(Int(node.volume * 100)) %")
                 parameter("Distancia · Duración", value: String(format: "%.2f beats", node.durationBeats))
@@ -266,6 +268,49 @@ struct StudioConsoleView: View {
                 }
             }
             .buttonStyle(.bordered)
+        }
+    }
+
+    /// Colocación exacta desde la ventana. El arrastre con la mano sigue siendo
+    /// la vía principal, pero a un metro de distancia la puntería fina cansa y
+    /// para *ordenar* el grafo hace falta poder afinar la posición sin pelearse.
+    private func positionControls(for node: SoundNode) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("POSICIÓN")
+                .font(.caption2.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+
+            axisSlider("Izquierda · Derecha", value: node.positionX, range: -2.4...2.4) {
+                state.moveNode(id: node.id, to: [$0, node.positionY, node.positionZ])
+            }
+            axisSlider("Abajo · Arriba", value: node.positionY, range: 0.35...2.5) {
+                state.moveNode(id: node.id, to: [node.positionX, $0, node.positionZ])
+            }
+            axisSlider("Lejos · Cerca", value: node.positionZ, range: -2.0...2.4) {
+                state.moveNode(id: node.id, to: [node.positionX, node.positionY, $0])
+            }
+        }
+    }
+
+    private func axisSlider(
+        _ title: String,
+        value: Float,
+        range: ClosedRange<Float>,
+        onChange: @escaping (Float) -> Void
+    ) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(width: 116, alignment: .leading)
+            Slider(
+                value: Binding(get: { value }, set: onChange),
+                in: range
+            )
+            Text(String(format: "%+.2f", value))
+                .font(.caption2.monospacedDigit())
+                .frame(width: 46, alignment: .trailing)
         }
     }
 

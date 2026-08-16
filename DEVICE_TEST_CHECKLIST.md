@@ -87,7 +87,13 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    que **el destino se ilumina antes de soltar**. Suelta y comprueba la línea.
 2. Repite soltando el hilo en el vacío: no debe crearse nada y debe avisarte.
 3. Comprueba que el punto de conexión se distingue del cuerpo: arrastrar el
-   cuerpo debe **mover** el organismo, no trazar hilo.
+   cuerpo debe **mover** el organismo, no trazar hilo. Prueba especialmente con
+   `Pad` y `Lead`, cuyos cuerpos son los más grandes.
+3b. **Fluidez al arrastrar.** Mueve un nodo sin soltar durante varios segundos:
+   debe seguir la mano sin tirones. Mientras tanto, pulsa un botón de la consola
+   con la otra mano: debe responder a la primera.
+3c. Si aun así no consigues moverlo con la mano, usa los sliders de **Posición**
+   del inspector y anótalo: significa que el arrastre 3D sigue fallando.
 4. **Cortar.** Haz pinch sobre una conexión: debe desaparecer al instante.
    Pulsa **Deshacer** en la consola y confirma que vuelve.
 5. Deshaz varias veces seguidas (corte, nodo añadido, demo cargada). Cada paso

@@ -78,6 +78,10 @@ Conectar no tiene modo ni botón: se tira de un hilo y se suelta donde quieras.
 Mientras el hilo está en el aire, el destino candidato se ilumina, así que sabes
 dónde va a engancharse antes de soltar.
 
+Si arrastrar con la mano se te resiste, el inspector tiene sliders de posición
+por eje. Es la vía exacta para ordenar el grafo sin pelearse con la puntería a
+un metro de distancia.
+
 ### Ordenar sin desafinar
 
 La posición controla el sonido, lo que hacía imposible acomodar el grafo sin

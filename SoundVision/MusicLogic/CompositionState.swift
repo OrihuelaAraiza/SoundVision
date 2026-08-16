@@ -9,7 +9,12 @@ final class CompositionState: ObservableObject {
     @Published var nodes: [SoundNode]
     @Published var connections: [SoundConnection]
     @Published var isImmersiveSpaceOpen = false
-    @Published var lastTriggeredNodeIDs: Set<UUID> = []
+    /// Los destellos de reproducción **no** se publican. Cada nota provocaba una
+    /// reevaluación completa de SwiftUI: con música sonando, la consola se
+    /// reconstruía decenas de veces por segundo y perdía pulsaciones de botón.
+    /// Ahora viajan por este callback directo a las entidades de la escena.
+    private(set) var soundingNodeIDs: Set<UUID> = []
+    var onSoundingChanged: ((Set<UUID>) -> Void)?
     @Published var selectedNodeID: UUID?
     @Published var statusMessage: String?
     @Published var spatialAudioSession: SpatialAudioSession?
@@ -346,7 +351,7 @@ final class CompositionState: ObservableObject {
         previewClearTask = nil
         pulseClearTasks.values.forEach { $0.cancel() }
         pulseClearTasks = [:]
-        lastTriggeredNodeIDs = []
+        clearSounding()
     }
 
     func save() {
@@ -387,7 +392,6 @@ final class CompositionState: ObservableObject {
         stopPlayback()
         nodes = []
         connections = []
-        lastTriggeredNodeIDs = []
         selectedNodeID = nil
         statusMessage = message
         isSpatialTestScene = false
@@ -404,12 +408,26 @@ final class CompositionState: ObservableObject {
         pulseClearTasks[nodeID] = Task { @MainActor [weak self] in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             guard !Task.isCancelled else { return }
-            self?.lastTriggeredNodeIDs.insert(nodeID)
+            self?.setSounding(nodeID, isSounding: true)
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
-            self?.lastTriggeredNodeIDs.remove(nodeID)
+            self?.setSounding(nodeID, isSounding: false)
             self?.pulseClearTasks[nodeID] = nil
         }
+    }
+
+    private func setSounding(_ nodeID: UUID, isSounding: Bool) {
+        let changed = isSounding
+            ? soundingNodeIDs.insert(nodeID).inserted
+            : soundingNodeIDs.remove(nodeID) != nil
+        guard changed else { return }
+        onSoundingChanged?(soundingNodeIDs)
+    }
+
+    private func clearSounding() {
+        guard !soundingNodeIDs.isEmpty else { return }
+        soundingNodeIDs = []
+        onSoundingChanged?(soundingNodeIDs)
     }
 
     private func recalculateAllConnections() {
