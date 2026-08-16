@@ -2,6 +2,32 @@ import Foundation
 
 enum SoundNodeType: String, Codable, CaseIterable, Sendable {
     case kick, snare, hiHat, clap, bass, pad, lead, fx
+
+    static func displayName(for type: SoundNodeType) -> String {
+        switch type {
+        case .kick: "Kick"
+        case .snare: "Snare"
+        case .hiHat: "Hi-hat"
+        case .clap: "Clap"
+        case .bass: "Bass"
+        case .pad: "Pad"
+        case .lead: "Lead"
+        case .fx: "FX"
+        }
+    }
+
+    static func icon(for type: SoundNodeType) -> String {
+        switch type {
+        case .kick: "circle.fill"
+        case .snare: "square.fill"
+        case .hiHat: "triangle.fill"
+        case .clap: "hands.clap.fill"
+        case .bass: "waveform.path"
+        case .pad: "cloud.fill"
+        case .lead: "bolt.fill"
+        case .fx: "sparkles"
+        }
+    }
 }
 
 struct SoundNode: Identifiable, Codable, Equatable, Sendable {

@@ -118,21 +118,39 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertEqual(state.connections.first?.sourceNodeID, nil)
     }
 
-    func testSpatialSceneStaysAtHumanHeightAndMapsDrawerDrop() {
+    func testSpatialSceneStaysAtHumanHeight() {
         XCTAssertEqual(SpatialSceneLayout.rootPosition.y, 0, accuracy: 0.001)
+    }
 
-        let center = SpatialSceneLayout.dropPosition(
-            at: CGPoint(x: 500, y: 400),
-            in: CGSize(width: 1_000, height: 800)
-        )
-        let upperRight = SpatialSceneLayout.dropPosition(
-            at: CGPoint(x: 900, y: 100),
-            in: CGSize(width: 1_000, height: 800)
-        )
+    /// Girar, soltar y volver a girar debe continuar desde donde quedó el nodo.
+    @MainActor
+    func testRotationAccumulatesAcrossGestures() {
+        let state = CompositionState()
+        let id = state.createNode(of: .pad, at: [0, 1.25, 0])
 
-        XCTAssertEqual(center.y, 1.325, accuracy: 0.001)
-        XCTAssertGreaterThan(upperRight.x, center.x)
-        XCTAssertGreaterThan(upperRight.y, center.y)
+        state.rotateNode(id: id, addingTo: .zero, delta: [.pi / 2, 0, 0])
+        guard let afterFirst = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(afterFirst.rotationX, .pi / 2, accuracy: 0.001)
+        XCTAssertEqual(afterFirst.reverb, 0.5, accuracy: 0.001)
+
+        let origin = SIMD3<Float>(afterFirst.rotationX, afterFirst.rotationY, afterFirst.rotationZ)
+        state.rotateNode(id: id, addingTo: origin, delta: [.pi / 4, 0, 0])
+        guard let afterSecond = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(afterSecond.rotationX, .pi * 0.75, accuracy: 0.001)
+        XCTAssertEqual(afterSecond.reverb, 0.75, accuracy: 0.001)
+    }
+
+    /// Mover un nodo debe reescribir pitch y volumen desde su nueva posición.
+    @MainActor
+    func testMovingNodeRemapsPitchAndVolume() {
+        let state = CompositionState()
+        let id = state.createNode(of: .lead, at: [0, 1.25, 0])
+
+        state.moveNode(id: id, to: [0.5, 1.9, 0.8])
+        guard let moved = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(moved.positionY, 1.9, accuracy: 0.001)
+        XCTAssertEqual(moved.pitch, SpatialParameterMapper.pitch(forHeight: 1.9), accuracy: 0.001)
+        XCTAssertEqual(moved.volume, SpatialParameterMapper.volume(forDepth: 0.8), accuracy: 0.001)
     }
 
     @MainActor

@@ -15,7 +15,11 @@ struct SpatialAudioSession: Identifiable, Sendable {
         nodes: [SoundNode],
         events: [GraphPlaybackEvent],
         secondsPerBeat: Double,
-        leadInSeconds: TimeInterval = 0.24
+        // Margen suficiente para que SwiftUI propague la sesión, RealityKit
+        // conecte las fuentes y la síntesis quede horneada antes del primer
+        // ataque. Con 0.24 s las primeras notas caían en el pasado y se perdían
+        // en silencio.
+        leadInSeconds: TimeInterval = 0.55
     ) {
         self.id = id
         self.nodes = nodes
@@ -36,6 +40,16 @@ final class AudioEngineManager: ObservableObject {
     private var controllers: [AudioGeneratorController] = []
     private var renderers: [SpatialVoiceRenderer] = []
 
+    /// Retira las fuentes de la sesión anterior. Debe correr **antes** de que la
+    /// escena elimine entidades: un `AudioGeneratorController` cuyo entity
+    /// desaparece sin haberse detenido deja audio colgado.
+    func retireSourcesIfNeeded(for session: SpatialAudioSession?) {
+        guard session?.id != sessionID else { return }
+        stopAll()
+    }
+
+    /// Adjunta las fuentes de la sesión actual. Debe correr **después** de que
+    /// la escena haya creado las entidades, o los nodos nuevos quedan mudos.
     func synchronize(session: SpatialAudioSession?, in root: Entity) {
         guard session?.id != sessionID else { return }
         stopAll()
@@ -85,11 +99,12 @@ final class AudioEngineManager: ObservableObject {
     private func spatialConfiguration(for node: SoundNode) -> SpatialAudioComponent {
         let musicalGain = 20 * log10(max(0.05, Double(node.volume)))
         let reverbLevel = -24 + Double(node.reverb) * 23
+        // Sin directividad: un organismo sonoro debe localizarse igual de bien
+        // desde cualquier ángulo, incluido a la espalda de la persona.
         return SpatialAudioComponent(
             gain: max(-24, min(musicalGain, 0)),
             directLevel: .zero,
             reverbLevel: max(-24, min(reverbLevel, -1)),
-            directivity: .beam(focus: .zero),
             distanceAttenuation: .rolloff(factor: 0.9)
         )
     }
@@ -105,7 +120,9 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
     private let samples: [Float]
 
     init(node: SoundNode, attackHostTimes: [UInt64]) {
-        attackSeconds = attackHostTimes.map(AVAudioTime.seconds(forHostTime:))
+        // Ordenados para poder acotar por búsqueda binaria qué ataques pueden
+        // sonar en un bloque concreto, en vez de recorrerlos todos por frame.
+        attackSeconds = attackHostTimes.map(AVAudioTime.seconds(forHostTime:)).sorted()
         soundDuration = node.type == .pad || node.type == .fx ? 0.9 : 0.38
         let fundamental: Double = switch node.type {
         case .kick: 62
@@ -132,14 +149,28 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         { [unowned self] _, timestamp, frameCount, audioBufferList in
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let blockStart = AVAudioTime.seconds(forHostTime: timestamp.pointee.mHostTime)
+            let blockEnd = blockStart + Double(frameCount) / sampleRate
+
+            // Solo los ataques cuya cola alcanza este bloque pueden aportar
+            // muestras. Recorrer la línea de tiempo completa por frame costaba
+            // cientos de miles de iteraciones por bloque y provocaba cortes.
+            let lower = lowerBound(for: blockStart - soundDuration)
+            let upper = lowerBound(for: blockEnd)
+            guard lower < upper else {
+                for buffer in buffers {
+                    guard let data = buffer.mData else { continue }
+                    memset(data, 0, Int(buffer.mDataByteSize))
+                }
+                return noErr
+            }
 
             for buffer in buffers {
                 guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                 for frame in 0..<Int(frameCount) {
                     let absoluteTime = blockStart + Double(frame) / sampleRate
                     var mixedSample: Float = 0
-                    for attack in attackSeconds {
-                        let localTime = absoluteTime - attack
+                    for index in lower..<upper {
+                        let localTime = absoluteTime - attackSeconds[index]
                         guard localTime >= 0, localTime < soundDuration else { continue }
                         let sampleIndex = min(samples.count - 1, Int(localTime * sampleRate))
                         mixedSample += samples[sampleIndex]
@@ -152,6 +183,22 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         }
     }
 
+    /// Primer índice cuyo ataque es >= `time`. Sin asignaciones ni locks, apto
+    /// para el hilo de audio.
+    private func lowerBound(for time: TimeInterval) -> Int {
+        var low = 0
+        var high = attackSeconds.count
+        while low < high {
+            let middle = (low + high) / 2
+            if attackSeconds[middle] < time {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
     /// Hornea síntesis y efectos al preparar la voz. El callback de audio solo
     /// mezcla muestras y no calcula seno, potencia, ruido ni ecos en tiempo real.
     private static func renderSamples(
@@ -162,28 +209,33 @@ private final class SpatialVoiceRenderer: @unchecked Sendable {
         seed: UInt64
     ) -> [Float] {
         let count = max(1, Int(duration * sampleRate))
-        return (0..<count).map { index in
-            let time = Double(index) / sampleRate
-            let dry = drySample(
-                at: time,
+        // La señal seca se calcula una sola vez y los ecos la reindexan. Antes
+        // cada muestra evaluaba `drySample` tres veces, triplicando el trabajo
+        // trigonométrico justo en el momento de pulsar Play.
+        let dry = (0..<count).map { index in
+            drySample(
+                at: Double(index) / sampleRate,
                 node: node,
                 duration: duration,
                 sampleRate: sampleRate,
                 baseFrequency: baseFrequency,
                 seed: seed
             )
-            let delayTime = 0.07 + Double(node.delay) * 0.48
-            let firstEcho = time >= delayTime
-                ? drySample(at: time - delayTime, node: node, duration: duration, sampleRate: sampleRate, baseFrequency: baseFrequency, seed: seed) * node.delay * 0.42
-                : 0
-            let secondEcho = time >= delayTime * 2
-                ? drySample(at: time - delayTime * 2, node: node, duration: duration, sampleRate: sampleRate, baseFrequency: baseFrequency, seed: seed) * node.delay * 0.18
-                : 0
-            let combined = dry + firstEcho + secondEcho
-            let drive = 1 + node.distortion * 8
-            return node.distortion > 0.001
-                ? tanh(combined * drive) / max(1, tanh(drive))
-                : combined
+        }
+
+        let delayOffset = max(1, Int((0.07 + Double(node.delay) * 0.48) * sampleRate))
+        let drive = 1 + node.distortion * 8
+        let normalization = max(1, tanh(drive))
+
+        return (0..<count).map { index in
+            var combined = dry[index]
+            if index >= delayOffset {
+                combined += dry[index - delayOffset] * node.delay * 0.42
+            }
+            if index >= delayOffset * 2 {
+                combined += dry[index - delayOffset * 2] * node.delay * 0.18
+            }
+            return node.distortion > 0.001 ? tanh(combined * drive) / normalization : combined
         }
     }
 

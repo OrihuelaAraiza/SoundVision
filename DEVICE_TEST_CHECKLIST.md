@@ -13,36 +13,38 @@
 
 ## Recorrido de 10 minutos
 
-### 0. Altura, cambio de modo y cajón
+### 0. Altura, consola y cambio de modo
 
 1. Confirma que Play y los nodos aparecen aproximadamente a la altura del torso,
    no sobre el suelo.
-2. En la demo pulsa **Crear mi pista**; todos los nodos de prueba deben desaparecer.
-3. Abre **Sonidos**, toca `Kick` y confirma que aparece un nodo seleccionado.
-4. Arrastra `Pad` desde el cajón y suéltalo arriba a la derecha; debe aparecer
-   cerca del punto de caída y conectado automáticamente con Play.
-5. Vuelve a **Demo espacial** y después a **Nueva pista** desde la barra inferior.
-6. Gira 90° y confirma que los paneles permanecen frente a ti a una distancia
-   cómoda, sin quedarse en el lugar donde comenzó la experiencia.
-7. Mantén el pinch sobre **MOVER** y acomoda cajón, controles, inspector y guía
-   por separado.
-8. Prueba **Más cerca** y **Más lejos**; el conjunto debe cambiar de distancia
-   sin saltos ni bloquear los botones.
-9. Pulsa el icono de mira **Recentrar menús** y confirma que todos vuelven a su lugar.
-10. Pulsa el icono de ventana **Controles movibles**, gira el cuerpo o la cabeza y
-   recoloca esa ventana frente a ti usando la barra inferior de visionOS.
-11. Desde la ventana flotante añade un nodo, reproduce y detén. Confirma que las
-   acciones también se reflejan inmediatamente en la escena inmersiva.
-12. Alterna diez veces entre **Demo espacial** y **Nueva pista**. Cada cambio debe
-    completar sin conservar nodos viejos, congelar controles ni dejar audio activo.
+2. Coloca la ventana de la consola donde te resulte cómoda con la barra inferior
+   de visionOS. **Gira 90° y camina un par de pasos**: la ventana debe quedarse
+   donde la pusiste, no seguirte la cabeza.
+3. Confirma que todos los botones de la consola se pueden mirar y pulsar sin que
+   el panel se mueva mientras los miras.
+4. En la demo pulsa **Nueva pista** y confirma el diálogo: **el diálogo debe
+   aparecer**. Después todos los nodos de prueba deben desaparecer.
+5. En **Añadir sonido** toca `Kick` y confirma que aparece un nodo seleccionado
+   y conectado a Play.
+6. Tira del núcleo Play dentro del espacio y suelta: debe extraerse un organismo
+   nuevo en el punto donde soltaste.
+7. Selecciona un nodo y pulsa la papelera: el diálogo de borrado debe aparecer y
+   confirmar debe eliminar nodo y conexiones.
+8. Alterna diez veces entre **Demo** y **Nueva pista**. Cada cambio debe
+   completar sin conservar nodos viejos, congelar controles ni dejar audio activo.
+9. Cierra el espacio con la corona digital: la ventana debe volver al lanzador,
+   no quedarse mostrando la consola.
 
-Registra: altura cómoda, claridad de los controles, cualquier drop que no cree
-un nodo y cualquier panel que pueda salirse del rango recuperable.
+Registra: altura cómoda, claridad de los controles y cualquier diálogo que no
+llegue a presentarse.
 
 ### 1. Localización inicial
 
 1. Pulsa **Reproducir**.
-2. Confirma que las tres cintas alrededor de Play aceleran y ondulan sin saltos.
+2. Confirma que **la primera nota suena** y no se pierde: el ataque inicial debe
+   oírse completo, no entrar a medias.
+3. Confirma que las cintas alrededor de Play aceleran y ondulan sin saltos, y
+   que la animación de reposo es fluida y no a tirones.
 3. Confirma que aparecen partículas luminosas alrededor del núcleo y del nodo activo.
 4. Confirma un Kick frontal y un FX detrás de la cabeza al inicio.
 5. Gira lentamente la cabeza 45 grados a cada lado.

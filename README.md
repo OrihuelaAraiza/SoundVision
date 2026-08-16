@@ -18,13 +18,22 @@ una composición musical en un grafo 3D interactivo.
 - Identidad visual modular: nodos compuestos, núcleo reactivo, conexiones y ondas.
 - Campo orbital `LowLevelMesh` deformado por un kernel Metal en tiempo real.
 - Partículas RealityKit con atlas original animado, ligadas a selección y audio.
-- Cajón de ocho instrumentos: toque para añadir o drag & drop para colocar.
-- Flujo explícito para alternar entre **Demo espacial** y **Nueva pista**.
-- Paneles RealityKit a distancia cómoda, anclados a la cabeza para permanecer
-  visibles, con asas independientes, ajuste **Más cerca / Más lejos** y
-  recuperación mediante **Recentrar menús**.
-- Ventana de **Controles movibles** que puede recolocarse físicamente con la
-  barra de ventana de visionOS cuando el usuario cambia de orientación.
+- Animación a la tasa de refresco de RealityKit mediante `System`, no a la
+  cadencia de un `TimelineView`.
+
+## Arquitectura de la interfaz
+
+El espacio inmersivo contiene **solo** la escultura sonora y sus gestos. Todos
+los controles viven en la ventana principal, que se convierte en la consola del
+estudio al entrar. Es una ventana normal de visionOS: el sistema le da su barra
+de movimiento, la persona la coloca donde quiera y ahí se queda.
+
+Una versión anterior anclaba los paneles a la cabeza con `AnchorEntity(.head)`.
+Eso los volvía inusables —seguían el giro de la cabeza, así que nunca podías
+mirarlos de frente— y obligó a inventar asas **MOVER**, ajustes de distancia y
+un botón de **Recentrar**. Nada de eso hace falta con una ventana del sistema, y
+además los diálogos de confirmación solo se presentan desde una ventana: dentro
+de un `ImmersiveSpace` no aparecían nunca.
 
 La dirección artística y sus decisiones están documentadas en
 [`VISUAL_IDENTITY.md`](VISUAL_IDENTITY.md).
@@ -42,23 +51,18 @@ El proyecto compila shaders Metal. Si una instalación nueva de Xcode no incluye
 el componente, instálalo desde **Xcode > Settings > Components > Metal Toolchain**
 o con `xcodebuild -downloadComponent MetalToolchain`.
 
-Para una prueba guiada, pulsa **Abrir demo**. La app cargará cinco
-fuentes distribuidas alrededor del usuario y abrirá una guía paso a paso dentro
-del espacio inmersivo.
+Para una prueba guiada, pulsa **Abrir demo espacial**. La app carga cinco
+fuentes distribuidas alrededor del usuario y muestra una guía paso a paso en la
+consola.
 
-Para componer desde cero, pulsa **Nueva pista**. El cajón **Sonidos** aparece a
-la izquierda: toca un instrumento para añadirlo en una posición segura o
-arrástralo y suéltalo sobre el lienzo para decidir su posición inicial.
+Para componer desde cero, pulsa **Nueva pista** y usa **Añadir sonido** en la
+consola. También puedes tirar del núcleo Play dentro del espacio para extraer un
+organismo nuevo en el punto donde sueltes.
 
-Cada panel tiene una zona visible **MOVER**. Mantén el pinch sobre ella y mueve
-la mano para acomodarlo. Usa **Más cerca / Más lejos** para ajustar la distancia
-del conjunto o el icono de mira para recuperar la distribución inicial.
-
-Si aun así algún panel queda fuera del campo de visión, pulsa **Controles movibles**
-desde la ventana principal o el icono de ventana en la barra de transporte.
-Después toma la barra inferior que proporciona visionOS y coloca la ventana
-frente a ti. Desde ahí puedes reproducir, cambiar de modo, añadir sonidos y
-operar el nodo seleccionado.
+Dentro del espacio inmersivo, el pinch selecciona un nodo, arrastrarlo lo mueve
+(conservando el punto de agarre) y girarlo con dos manos ajusta reverb, delay y
+distorsión. Si la consola te estorba, muévela con la barra inferior que le da
+visionOS o ciérrala; la escultura sigue funcionando.
 
 El simulador valida la escena y la interacción básica. La percepción espacial,
 ergonomía, audio y comodidad deben validarse también en un Apple Vision Pro real.

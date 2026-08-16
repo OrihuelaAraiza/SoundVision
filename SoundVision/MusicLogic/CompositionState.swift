@@ -40,6 +40,10 @@ final class CompositionState: ObservableObject {
         nodes.first { $0.id == selectedNodeID }
     }
 
+    func node(id: UUID) -> SoundNode? {
+        nodes.first { $0.id == id }
+    }
+
     func selectNode(id: UUID) {
         if let sourceID = pendingConnectionSourceID, sourceID != id {
             connect(sourceID: sourceID, destinationID: id)
@@ -115,7 +119,7 @@ final class CompositionState: ObservableObject {
         )
         let finalPosition = clamped(position ?? defaultPosition)
         let node = SoundNode(
-            name: displayName(for: type),
+            name: SoundNodeType.displayName(for: type),
             type: type,
             volume: SpatialParameterMapper.volume(forDepth: finalPosition.z),
             pitch: SpatialParameterMapper.pitch(forHeight: finalPosition.y),
@@ -127,7 +131,7 @@ final class CompositionState: ObservableObject {
         connect(sourceID: sourceID, destinationID: node.id)
         selectedNodeID = node.id
         sceneContentRevision &+= 1
-        statusMessage = "\(displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
+        statusMessage = "\(SoundNodeType.displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
         return node.id
     }
 
@@ -142,9 +146,15 @@ final class CompositionState: ObservableObject {
         recalculateConnections(touching: id)
     }
 
-    func rotateNode(id: UUID, quaternion: simd_quatf) {
+    /// La rotación se acumula sobre el valor que el nodo tenía al empezar el
+    /// gesto, para que soltar y volver a girar continúe en vez de reiniciar.
+    func rotateNode(id: UUID, addingTo origin: SIMD3<Float>, delta: SIMD3<Float>) {
         guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
-        let vector = quaternion.axis * quaternion.angle
+        let vector = SIMD3<Float>(
+            (origin.x + delta.x).truncatingRemainder(dividingBy: 2 * .pi),
+            (origin.y + delta.y).truncatingRemainder(dividingBy: 2 * .pi),
+            (origin.z + delta.z).truncatingRemainder(dividingBy: 2 * .pi)
+        )
         nodes[index].rotationX = vector.x
         nodes[index].rotationY = vector.y
         nodes[index].rotationZ = vector.z
@@ -402,18 +412,5 @@ final class CompositionState: ObservableObject {
             destinationNodeID: destination.id,
             durationBeats: SpatialParameterMapper.durationBeats(from: sourcePosition, to: destinationPosition)
         )
-    }
-
-    private func displayName(for type: SoundNodeType) -> String {
-        switch type {
-        case .kick: "Kick"
-        case .snare: "Snare"
-        case .hiHat: "Hi-hat"
-        case .clap: "Clap"
-        case .bass: "Bass"
-        case .pad: "Pad"
-        case .lead: "Lead"
-        case .fx: "FX"
-        }
     }
 }

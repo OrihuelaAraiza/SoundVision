@@ -31,24 +31,4 @@ enum CentralCoreSystem {
         return root
     }
 
-    static func update(_ core: Entity, activeCount: Int, triggeredCount: Int, time: TimeInterval) {
-        let activity = Float(activeCount) / 8
-        let breathing = Float(sin(time * 1.35)) * 0.035
-        core.findEntity(named: "core-outer")?.scale = SIMD3(repeating: 1 + activity * 0.28 + breathing)
-        core.findEntity(named: "core-heart")?.scale = SIMD3(repeating: 0.9 + activity * 0.42 + Float(triggeredCount) * 0.16)
-
-        if let shell = core.findEntity(named: "core-shell") as? ModelEntity {
-            shell.scale = SIMD3(repeating: 1 + activity * 0.12 + (triggeredCount > 0 ? 0.16 : 0))
-            let materialBand = min(4, activeCount / 2) + (triggeredCount > 0 ? 10 : 0)
-            if core.components[CoreRenderedStateComponent.self]?.materialBand != materialBand {
-                shell.model?.materials = [SoundVisionMaterials.core(intensity: 0.5 + activity * 0.5)]
-                core.components.set(CoreRenderedStateComponent(materialBand: materialBand))
-            }
-            shell.orientation = simd_quatf(angle: Float(time * 0.16), axis: [0.3, 1, 0.2])
-        }
-    }
-}
-
-private struct CoreRenderedStateComponent: Component {
-    var materialBand: Int
 }
