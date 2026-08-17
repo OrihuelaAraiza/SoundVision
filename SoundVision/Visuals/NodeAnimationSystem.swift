@@ -45,6 +45,13 @@ private struct CoreRenderedStateComponent: Component, Equatable {
     var materialBand: Int
 }
 
+/// Ondas vivas de un organismo. `-infinity` marca una ranura libre.
+private struct TriggerWaveComponent: Component {
+    var birthTimes = SIMD4<Double>(repeating: -.infinity)
+    var nextSlot = 0
+    var wasTriggered = false
+}
+
 /// Anima los organismos sonoros a frame rate. Antes esta lógica colgaba de un
 /// `TimelineView` a 12–20 Hz, lo que se percibía como tartamudeo constante en
 /// Vision Pro; un `System` de RealityKit corre al ritmo del compositor.
@@ -81,9 +88,9 @@ struct NodeAnimationSystem: System {
         let renderedState = NodeRenderedStateComponent(isActive: node.isActive, isTriggered: node.isTriggered)
         if entity.components[NodeRenderedStateComponent.self] != renderedState {
             updateMaterials(in: entity, node: node)
-            WaveformVisualizer.updateWave(in: entity, type: node.type, isTriggered: node.isTriggered)
             entity.components.set(renderedState)
         }
+        updateWaves(in: entity, node: node, style: style, time: time)
         updatePersonality(in: entity, node: node, time: time)
         ParticleEffectSystem.updateNode(
             in: entity,
@@ -108,6 +115,31 @@ struct NodeAnimationSystem: System {
         }
 
         entity.findEntity(named: NodeEntityFactory.soundLockName)?.isEnabled = node.isSoundLocked
+
+        for child in entity.children where child.name.hasPrefix("node-readout-") {
+            child.isEnabled = node.isSelected
+        }
+    }
+
+    /// Cada ataque lanza una onda nueva en la siguiente ranura libre. Lo que
+    /// dispara es el **flanco**, no el estado: mientras el nodo sigue sonando no
+    /// deben brotar ondas sin parar.
+    private func updateWaves(
+        in entity: Entity,
+        node: SoundNodeVisualComponent,
+        style: NodeVisualStyle,
+        time: TimeInterval
+    ) {
+        var waves = entity.components[TriggerWaveComponent.self] ?? TriggerWaveComponent()
+
+        if node.isTriggered && !waves.wasTriggered {
+            waves.birthTimes[waves.nextSlot] = time
+            waves.nextSlot = (waves.nextSlot + 1) % WaveformVisualizer.concurrentWaves
+        }
+        waves.wasTriggered = node.isTriggered
+        entity.components.set(waves)
+
+        WaveformVisualizer.update(in: entity, style: style, birthTimes: waves.birthTimes, time: time)
     }
 
     private func updateMaterials(in root: Entity, node: SoundNodeVisualComponent) {

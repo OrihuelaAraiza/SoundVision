@@ -49,6 +49,13 @@ llegue a presentarse.
 
 ### 1. Localización inicial
 
+0. **Ondas.** Con la música sonando, cada organismo que entra debe **emitir una
+   onda que se expande y se desvanece**, no un parpadeo. En un pasaje rápido
+   deben verse varias en el aire a la vez.
+0b. **Resaltado al mirar.** Mira un organismo sin tocarlo: debe encenderse con
+   **su propio color**. Mira otro: el primero debe apagarse.
+0c. **Etiqueta.** Sin selección, el espacio no debe tener texto flotando. Haz
+   pinch sobre un organismo: solo entonces aparece su lectura, y solo la suya.
 1. Pulsa **Reproducir**.
 2. **Confirma que suena algo.** Si no, mira la consola: un aviso naranja dirá si
    las voces no llegaron a engancharse o si están conectadas pero mudas. Anota

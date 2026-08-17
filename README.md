@@ -93,6 +93,27 @@ siguiente organismo y cuánto sostiene el anterior. Separar dos organismos alarg
 la nota; juntarlos la vuelve staccato. Los percusivos son la excepción: un golpe
 es un golpe y no se estira por alejarlo.
 
+## Qué ves cuando suena
+
+Cada ataque lanza una **onda que se expande y se desvanece**, y varias conviven:
+en un pasaje rápido se ven salir una tras otra. Antes era una sola esfera que
+aparecía y desaparecía de golpe, lo que se leía como parpadeo y no como sonido
+emitido.
+
+Mirar un organismo lo **enciende con su propio color** en vez del resaltado
+genérico del sistema. Conviene saber por qué funciona así: **visionOS nunca le
+dice a la app hacia dónde miras**. Es una garantía de privacidad, no una API que
+falte. El resaltado lo dibuja el sistema por su cuenta, fuera del proceso de la
+app, que jamás se entera.
+
+Por eso la información del organismo aparece al **seleccionarlo** con un pinch,
+no al mirarlo: mostrar texto requiere que la app sepa qué estás mirando, y no
+puede. La etiqueta permanece oculta el resto del tiempo — ocho etiquetas a la
+vez llenaban el espacio de texto que nadie leía. Revelarla con la mirada sin
+romper esa garantía es posible con `HoverEffectComponent(.shader(...))`, donde
+la GPU reacciona al hover por su cuenta, pero exige materiales ShaderGraph
+authorizados en Reality Composer Pro; queda pendiente.
+
 ## Gestos
 
 Todo lo que construye la música se hace con las manos, dentro del espacio:

@@ -13,14 +13,21 @@ enum NodeEntityFactory {
         root.position = SIMD3(node.positionX, node.positionY, node.positionZ)
 
         let surface = SoundVisionMaterials.nodeSurface(for: node.type, isActive: node.isActive)
+        let highlight = NodeVisualStyle.style(for: node.type).color
         for part in visualParts(for: node.type, surface: surface) {
             part.components.set(InputTargetComponent())
-            part.components.set(HoverEffectComponent())
+            // Resaltado con el color del propio instrumento en vez del genérico
+            // del sistema: al mirar un organismo, se enciende como él mismo.
+            // visionOS nunca dice a la app hacia dónde miras —es una garantía de
+            // privacidad—, así que este efecto lo dibuja el sistema por su cuenta.
+            part.components.set(HoverEffectComponent(.highlight(
+                .init(color: highlight, strength: 0.75)
+            )))
             part.generateCollisionShapes(recursive: false)
             root.addChild(part)
         }
 
-        root.addChild(WaveformVisualizer.makeWave(for: node.type))
+        WaveformVisualizer.makeWaves(for: node.type).forEach { root.addChild($0) }
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(makeSelectionHalo(for: node.type))
         root.addChild(makeConnectorStem(for: node.type))
@@ -94,7 +101,16 @@ enum NodeEntityFactory {
     /// cada frame de un arrastre: era la causa principal de que la app se
     /// trabara y de que la consola perdiera pulsaciones. Ahora el valor va en
     /// pasos gruesos y además no se reconstruye más de ~8 veces por segundo.
-    static func updateSpatialReadout(in root: Entity, node: SoundNode, at time: TimeInterval) {
+    static func updateSpatialReadout(
+        in root: Entity,
+        node: SoundNode,
+        isVisible: Bool,
+        at time: TimeInterval
+    ) {
+        // Oculta, no hay nada que teselar. Antes se reconstruía la etiqueta de
+        // los ocho organismos aunque nadie estuviera leyendo ninguna.
+        guard isVisible else { return }
+
         let expectedState = readoutState(for: node)
         let previous = root.components[NodeReadoutStateComponent.self]
         guard previous != expectedState else { return }
@@ -180,6 +196,9 @@ enum NodeEntityFactory {
         let container = Entity()
         container.name = readoutName(for: node)
         container.position = [-0.16, 0.27, 0.02]
+        // Solo el organismo seleccionado enseña su lectura; ocho etiquetas a la
+        // vez llenaban el espacio de texto que nadie estaba leyendo.
+        container.isEnabled = false
 
         let text = String(
             format: "%@   %+.0f st   %d%%",

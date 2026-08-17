@@ -268,7 +268,12 @@ struct SoundSculptureView: View {
             // Búsqueda en diccionario, no recorrido recursivo del árbol: esto
             // corría por cada nodo en cada pasada de actualización.
             guard let entity = scene.entity(for: node.id, in: root) else { continue }
-            NodeEntityFactory.updateSpatialReadout(in: entity, node: node, at: now)
+            NodeEntityFactory.updateSpatialReadout(
+                in: entity,
+                node: node,
+                isVisible: state.selectedNodeID == node.id,
+                at: now
+            )
             var component = SoundNodeVisualComponent(
                 node: node,
                 // El candidato a destino se ilumina como si estuviera
