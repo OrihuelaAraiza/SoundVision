@@ -127,7 +127,13 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     var render: Audio.GeneratorRenderHandler {
         // `isSilence` es parte del contrato, no un parámetro ignorable: quien
         // consume el buffer puede descartarlo si queda marcado como silencio.
-        { [unowned self] isSilence, timestamp, frameCount, audioBufferList in
+        // Captura fuerte a propósito. El handler debe mantener viva a su voz
+        // mientras RealityKit conserve la referencia: con `unowned`, soltar la
+        // voz al detener la reproducción la destruía —liberando de paso su
+        // memoria manual— mientras el grafo de audio aún podía invocarla. Eso
+        // dejaba el motor corrupto después de la primera reproducción. Cuando
+        // RealityKit suelta el generador, suelta el closure y la voz muere bien.
+        { [self] isSilence, timestamp, frameCount, audioBufferList in
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let blockStart = self.blockStartSeconds(from: timestamp.pointee)
             let frames = Int(frameCount)

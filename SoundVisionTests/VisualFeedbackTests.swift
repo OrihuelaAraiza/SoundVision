@@ -13,13 +13,13 @@ final class VisualFeedbackTests: XCTestCase {
         let root = makeRootWithWaves()
         let birth = SIMD4<Double>(0, -.infinity, -.infinity, -.infinity)
 
-        WaveformVisualizer.update(in: root, style: style, birthTimes: birth, time: 0.05)
+        WaveformVisualizer.update(waves: waves(in: root), style: style, birthTimes: birth, time: 0.05)
         let early = try firstWave(in: root)
         let earlyScale = early.scale.x
         let earlyOpacity = try XCTUnwrap(early.components[OpacityComponent.self]?.opacity)
         XCTAssertTrue(early.isEnabled)
 
-        WaveformVisualizer.update(in: root, style: style, birthTimes: birth, time: 0.5)
+        WaveformVisualizer.update(waves: waves(in: root), style: style, birthTimes: birth, time: 0.5)
         let late = try firstWave(in: root)
         let lateScale = late.scale.x
         let lateOpacity = try XCTUnwrap(late.components[OpacityComponent.self]?.opacity)
@@ -32,11 +32,11 @@ final class VisualFeedbackTests: XCTestCase {
         let root = makeRootWithWaves()
         let birth = SIMD4<Double>(0, -.infinity, -.infinity, -.infinity)
 
-        WaveformVisualizer.update(in: root, style: style, birthTimes: birth, time: 0.3)
+        WaveformVisualizer.update(waves: waves(in: root), style: style, birthTimes: birth, time: 0.3)
         XCTAssertTrue(try firstWave(in: root).isEnabled)
 
         WaveformVisualizer.update(
-            in: root,
+            waves: waves(in: root),
             style: style,
             birthTimes: birth,
             time: WaveformVisualizer.lifetime + 0.1
@@ -50,7 +50,7 @@ final class VisualFeedbackTests: XCTestCase {
         let now: Double = 1.0
         let birth = SIMD4<Double>(now, now - 0.1, now - 0.2, -.infinity)
 
-        WaveformVisualizer.update(in: root, style: style, birthTimes: birth, time: now)
+        WaveformVisualizer.update(waves: waves(in: root), style: style, birthTimes: birth, time: now)
 
         let enabled = (0..<WaveformVisualizer.concurrentWaves).filter {
             root.findEntity(named: WaveformVisualizer.name(at: $0))?.isEnabled == true
@@ -61,7 +61,7 @@ final class VisualFeedbackTests: XCTestCase {
     func testUnbornWavesStayHidden() throws {
         let root = makeRootWithWaves()
         WaveformVisualizer.update(
-            in: root,
+            waves: waves(in: root),
             style: style,
             birthTimes: SIMD4<Double>(repeating: -.infinity),
             time: 5
@@ -83,6 +83,13 @@ final class VisualFeedbackTests: XCTestCase {
     }
 
     // MARK: - Utilidades
+
+    /// Las ondas en orden, tal y como las entrega la fábrica al organismo.
+    private func waves(in root: Entity) -> [Entity] {
+        (0..<WaveformVisualizer.concurrentWaves).compactMap {
+            root.findEntity(named: WaveformVisualizer.name(at: $0))
+        }
+    }
 
     private func makeRootWithWaves() -> Entity {
         let root = Entity()

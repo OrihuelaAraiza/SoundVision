@@ -45,6 +45,16 @@ private struct CoreRenderedStateComponent: Component, Equatable {
     var materialBand: Int
 }
 
+/// Referencias a las piezas del organismo, resueltas una sola vez al crearlo.
+/// Buscarlas por nombre costaba siete recorridos recursivos del subárbol por
+/// nodo y por frame, y eso se notaba como tirones con varios organismos.
+struct NodePartsComponent: Component {
+    var waves: [Entity] = []
+    var halo: Entity?
+    var connector: Entity?
+    var soundLockPlinth: Entity?
+}
+
 /// Ondas vivas de un organismo. `-infinity` marca una ranura libre.
 private struct TriggerWaveComponent: Component {
     var birthTimes = SIMD4<Double>(repeating: -.infinity)
@@ -90,7 +100,8 @@ struct NodeAnimationSystem: System {
             updateMaterials(in: entity, node: node)
             entity.components.set(renderedState)
         }
-        updateWaves(in: entity, node: node, style: style, time: time)
+        let parts = entity.components[NodePartsComponent.self] ?? NodePartsComponent()
+        updateWaves(in: entity, parts: parts, node: node, style: style, time: time)
         updatePersonality(in: entity, node: node, time: time)
         ParticleEffectSystem.updateNode(
             in: entity,
@@ -99,14 +110,14 @@ struct NodeAnimationSystem: System {
             isActive: node.isActive
         )
 
-        if let halo = entity.findEntity(named: "selection-halo") {
+        if let halo = parts.halo {
             halo.isEnabled = node.isSelected
             halo.scale = SIMD3(repeating: node.isSelected ? 1.08 + Float(sin(time * 2.4)) * 0.05 : 1)
         }
 
         // El conector late siempre un poco para invitar a tirar de él, y se
         // agranda mientras el hilo está en el aire.
-        if let connector = entity.findEntity(named: NodeEntityFactory.connectorName) {
+        if let connector = parts.connector {
             let pulse = 1 + Float(sin(time * 1.9)) * 0.09
             // Crece al seleccionar el organismo: una vez que ya lo elegiste,
             // tirar del hilo es lo siguiente que vas a querer hacer.
@@ -114,11 +125,7 @@ struct NodeAnimationSystem: System {
             connector.scale = SIMD3(repeating: emphasis)
         }
 
-        entity.findEntity(named: NodeEntityFactory.soundLockName)?.isEnabled = node.isSoundLocked
-
-        for child in entity.children where child.name.hasPrefix("node-readout-") {
-            child.isEnabled = node.isSelected
-        }
+        parts.soundLockPlinth?.isEnabled = node.isSoundLocked
     }
 
     /// Cada ataque lanza una onda nueva en la siguiente ranura libre. Lo que
@@ -126,6 +133,7 @@ struct NodeAnimationSystem: System {
     /// deben brotar ondas sin parar.
     private func updateWaves(
         in entity: Entity,
+        parts: NodePartsComponent,
         node: SoundNodeVisualComponent,
         style: NodeVisualStyle,
         time: TimeInterval
@@ -139,7 +147,12 @@ struct NodeAnimationSystem: System {
         waves.wasTriggered = node.isTriggered
         entity.components.set(waves)
 
-        WaveformVisualizer.update(in: entity, style: style, birthTimes: waves.birthTimes, time: time)
+        WaveformVisualizer.update(
+            waves: parts.waves,
+            style: style,
+            birthTimes: waves.birthTimes,
+            time: time
+        )
     }
 
     private func updateMaterials(in root: Entity, node: SoundNodeVisualComponent) {

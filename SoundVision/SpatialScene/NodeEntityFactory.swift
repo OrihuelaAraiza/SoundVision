@@ -27,14 +27,26 @@ enum NodeEntityFactory {
             root.addChild(part)
         }
 
-        WaveformVisualizer.makeWaves(for: node.type).forEach { root.addChild($0) }
+        let waves = WaveformVisualizer.makeWaves(for: node.type)
+        waves.forEach { root.addChild($0) }
+        let halo = makeSelectionHalo(for: node.type)
+        let connector = makeConnector(for: node.type)
+        let plinth = makeSoundLockPlinth()
+
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
-        root.addChild(makeSelectionHalo(for: node.type))
+        root.addChild(halo)
         root.addChild(makeConnectorStem(for: node.type))
-        root.addChild(makeConnector(for: node.type))
-        root.addChild(makeSoundLockPlinth())
+        root.addChild(connector)
+        root.addChild(plinth)
         root.addChild(makeSpatialReadout(for: node))
         root.components.set(readoutState(for: node))
+        // Resueltas aquí, no buscadas por nombre en cada frame.
+        root.components.set(NodePartsComponent(
+            waves: waves,
+            halo: halo,
+            connector: connector,
+            soundLockPlinth: plinth
+        ))
         return root
     }
 
@@ -107,6 +119,11 @@ enum NodeEntityFactory {
         isVisible: Bool,
         at time: TimeInterval
     ) {
+        // Esta función corre cuando cambia el estado, no en cada frame, así que
+        // aquí sí sale a cuenta recorrer los hijos.
+        for child in root.children where child.name.hasPrefix("node-readout-") {
+            child.isEnabled = isVisible
+        }
         // Oculta, no hay nada que teselar. Antes se reconstruía la etiqueta de
         // los ocho organismos aunque nadie estuviera leyendo ninguna.
         guard isVisible else { return }
@@ -119,7 +136,9 @@ enum NodeEntityFactory {
         for child in root.children where child.name.hasPrefix("node-readout-") {
             child.removeFromParent()
         }
-        root.addChild(makeSpatialReadout(for: node))
+        let readout = makeSpatialReadout(for: node)
+        readout.isEnabled = true
+        root.addChild(readout)
         var stamped = expectedState
         stamped.renderedAt = time
         root.components.set(stamped)

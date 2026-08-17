@@ -1,4 +1,5 @@
 import AVFAudio
+import RealityKit
 import XCTest
 @testable import SoundVision
 
@@ -64,6 +65,30 @@ final class SpatialVoiceRendererTests: XCTestCase {
         let output = render(renderer, hostTime: mach_absolute_time(), hostTimeValid: true)
         XCTAssertFalse(output.contains { $0 != 0 }, "Nada debe sonar 30 s antes del ataque")
         XCTAssertTrue(lastBlockWasMarkedSilent, "Un bloque vacío sí debe marcarse como silencio")
+    }
+
+    /// El handler tiene que mantener viva a su voz. Con una captura `unowned`,
+    /// soltar la voz al detener la reproducción la destruía —liberando de paso
+    /// su memoria manual— mientras el grafo de audio aún podía invocarla, y el
+    /// motor quedaba corrupto tras la primera reproducción.
+    func testHandlerKeepsItsVoiceAliveAfterTheEngineDropsIt() {
+        var handler: Audio.GeneratorRenderHandler?
+        weak var weakVoice: SpatialVoiceRenderer?
+
+        autoreleasepool {
+            let voice = SpatialVoiceRenderer(
+                node: SoundNode(name: "Bass", type: .bass, positionX: 0, positionY: 1.25, positionZ: 0),
+                attackHostTimes: [mach_absolute_time()]
+            )
+            weakVoice = voice
+            handler = voice.render
+        }
+
+        XCTAssertNotNil(handler)
+        XCTAssertNotNil(weakVoice, "El handler debe retener a su voz mientras el motor lo conserve")
+
+        handler = nil
+        XCTAssertNil(weakVoice, "Al soltar el handler, la voz debe liberarse sin fugas")
     }
 
     /// Ejecuta un bloque del callback real y devuelve las muestras producidas.

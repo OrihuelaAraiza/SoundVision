@@ -30,9 +30,8 @@ enum WaveformVisualizer {
     /// Expande y desvanece cada onda viva. La opacidad se modula con
     /// `OpacityComponent`, que RealityKit resuelve sin reconstruir materiales:
     /// hacerlo cambiando el material costaría una asignación por frame y por onda.
-    static func update(in root: Entity, style: NodeVisualStyle, birthTimes: SIMD4<Double>, time: TimeInterval) {
-        for index in 0..<concurrentWaves {
-            guard let wave = root.findEntity(named: name(at: index)) else { continue }
+    static func update(waves: [Entity], style: NodeVisualStyle, birthTimes: SIMD4<Double>, time: TimeInterval) {
+        for (index, wave) in waves.enumerated() where index < concurrentWaves {
             let age = time - birthTimes[index]
 
             guard age >= 0, age < lifetime else {

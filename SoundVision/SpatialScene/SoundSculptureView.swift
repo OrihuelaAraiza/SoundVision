@@ -166,8 +166,14 @@ struct SoundSculptureView: View {
                     scene.pendingDragTarget = nil
                 } else if TransportNodeFactory.isTransportEntity(value.entity),
                           let root = sculptureRoot(from: value.entity) {
-                    // Extraer un organismo nuevo tirando del núcleo Play.
-                    state.createNextNode(at: value.convert(value.location3D, from: .local, to: root))
+                    // Extraer un organismo exige un tirón deliberado. Antes
+                    // bastaban los 8 puntos mínimos del gesto, así que rozar el
+                    // núcleo al intentar cualquier otra cosa hacía brotar
+                    // organismos que nadie había pedido.
+                    let drop = value.convert(value.location3D, from: .local, to: root)
+                    if simd_distance(drop, CompositionState.playNodePosition) > 0.45 {
+                        state.createNextNode(at: drop)
+                    }
                 }
             }
     }
