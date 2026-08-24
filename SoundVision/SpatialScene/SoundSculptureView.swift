@@ -24,18 +24,22 @@ struct SoundSculptureView: View {
             // muertos y la escena sin actualizar.
             guard let root = content.entities.first(where: { $0.name == sculptureName }) else { return }
             scene.adopt(root: root)
-            // El orden importa en ambos extremos: las fuentes viejas se detienen
-            // antes de que sus entidades desaparezcan, y las nuevas se adjuntan
-            // solo después de que la escena las haya creado.
-            audioEngine.retireSourcesIfNeeded(for: state.spatialAudioSession)
+            // El orden importa en ambos extremos: las voces de organismos que se
+            // van se detienen antes de que sus entidades desaparezcan, y las
+            // nuevas se enganchan solo después de que la escena las haya creado.
+            let sustainBeats = state.sustainBeatsByNode()
+            audioEngine.releaseVoices(keeping: Set(state.nodes.map(\.id)))
             reconcileNodes(in: root)
-            audioEngine.synchronize(session: state.spatialAudioSession, in: root)
+            audioEngine.attachVoices(for: state.nodes, sustainBeats: sustainBeats) { id in
+                scene.entity(for: id, in: root)
+            }
             // Lo que la mano acaba de cambiar llega a las voces que ya suenan:
             // con la síntesis en tiempo real, mover un organismo se oye ya.
-            audioEngine.updateLiveParameters(
-                nodes: state.nodes,
-                sustainBeats: state.sustainBeatsByNode()
-            )
+            audioEngine.updateLiveParameters(nodes: state.nodes, sustainBeats: sustainBeats)
+            // Publicar la agenda va al final: para entonces todas las voces
+            // existen y tienen sus parámetros al día, así que la primera nota
+            // suena con la afinación y el volumen correctos.
+            audioEngine.publish(session: state.spatialAudioSession)
             syncVisualState(in: root)
             reportAudioProblem()
         }
@@ -43,10 +47,31 @@ struct SoundSculptureView: View {
         .simultaneousGesture(dragGesture)
         .simultaneousGesture(rotationGesture)
         .onAppear {
+            audioEngine.prepare()
             // Los destellos van directo a las entidades. Publicarlos obligaba a
             // reconstruir toda la interfaz en cada nota, y la consola perdía
             // pulsaciones mientras sonaba la música.
-            state.onSoundingChanged = { ids in applySounding(ids) }
+            //
+            // El closure captura el puente, no la vista: guardar `self` en un
+            // callback que vive fuera del ciclo de SwiftUI significaba leer
+            // `@State` y `@EnvironmentObject` fuera de `body` en cada nota, que
+            // es territorio sin garantías y una de las vías por las que la app
+            // podía caerse en pleno pasaje rápido.
+            let bridge = scene
+            state.onSoundingChanged = { [bridge] ids in bridge.applySounding(ids) }
+        }
+        .task {
+            // Un latido de 1 Hz basta para que la consola cuente qué está
+            // haciendo el motor sin volver a caer en el error de publicar
+            // estado por nota, que era lo que dejaba la interfaz sin respuesta.
+            // En reposo el pico cae a cero y la cadena se estabiliza sola, así
+            // que esto no genera pasadas de SwiftUI mientras nadie toca nada.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled else { return }
+                let summary = audioEngine.diagnosticsSummary()
+                if summary != state.audioDiagnostics { state.audioDiagnostics = summary }
+            }
         }
         .onDisappear {
             // El espacio también puede cerrarse desde el sistema (corona
@@ -55,6 +80,7 @@ struct SoundSculptureView: View {
             state.onSoundingChanged = nil
             audioEngine.stopAll()
             state.stopPlayback()
+            state.audioDiagnostics = nil
             state.isImmersiveSpaceOpen = false
         }
     }
@@ -110,7 +136,7 @@ struct SoundSculptureView: View {
                     // medir desde el inicio real hacía saltar el nodo esa
                     // distancia de golpe en cuanto empezaba a moverse.
                     scene.dragReferences[id] = current
-                    state.selectedNodeID = id
+                    state.focusNode(id: id)
                 }
                 let reference = scene.dragReferences[id] ?? current
                 let target = state.clampedPosition(origin + (current - reference))
@@ -172,7 +198,9 @@ struct SoundSculptureView: View {
                     // organismos que nadie había pedido.
                     let drop = value.convert(value.location3D, from: .local, to: root)
                     if simd_distance(drop, CompositionState.playNodePosition) > 0.45 {
-                        state.createNextNode(at: drop)
+                        // Tirar del núcleo es decir "esto nace de Play",
+                        // independientemente del origen elegido en la consola.
+                        state.createNextNode(at: drop, from: .play)
                     }
                 }
             }
@@ -206,7 +234,7 @@ struct SoundSculptureView: View {
                 let origin = scene.rotationOrigins[id] ?? [node.rotationX, node.rotationY, node.rotationZ]
                 if scene.rotationOrigins[id] == nil {
                     scene.rotationOrigins[id] = origin
-                    state.selectedNodeID = id
+                    state.focusNode(id: id)
                 }
 
                 let rotation = simd_quatf(value.rotation)
@@ -298,30 +326,6 @@ struct SoundSculptureView: View {
         }
     }
 
-    /// Aplica los destellos directamente sobre las entidades afectadas.
-    private func applySounding(_ ids: Set<UUID>) {
-        let changed = scene.soundingIDs.symmetricDifference(ids)
-        scene.soundingIDs = ids
-
-        for id in changed {
-            guard let entity = scene.nodeEntities[id],
-                  var component = entity.components[SoundNodeVisualComponent.self]
-            else { continue }
-            component.isTriggered = ids.contains(id)
-            entity.components.set(component)
-        }
-
-        if let transport = scene.transport,
-           var component = transport.components[TransportVisualComponent.self] {
-            component.triggeredCount = ids.count
-            transport.components.set(component)
-        }
-
-        if let root = scene.root {
-            ConnectionLineSystem.applyTriggerHighlights(in: root, triggeredIDs: ids)
-        }
-    }
-
     /// Publica el diagnóstico del motor **fuera** del ciclo de actualización:
     /// escribir estado observado desde dentro de `update` es justamente lo que
     /// antes dejaba a SwiftUI recalculando sin parar.
@@ -363,10 +367,9 @@ struct SoundSculptureView: View {
             source.positionY + verticalOffset - 0.34,
             source.positionZ
         )
-        let vector = endPoint - from
-        let length = max(simd_length(vector), 0.001)
+        let length = SpatialSceneLayout.segmentLength(from: from, to: endPoint)
         tendril.position = (from + endPoint) / 2
-        tendril.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+        tendril.orientation = SpatialSceneLayout.segmentOrientation(from: from, to: endPoint)
         tendril.scale = [candidate == nil ? 1 : 1.9, length, candidate == nil ? 1 : 1.9]
 
         // Ilumina el destino candidato en cuanto cambia, sin esperar a SwiftUI.
@@ -454,6 +457,31 @@ private final class SculptureBridge {
         else { return }
         component.position = position
         entity.components.set(component)
+    }
+
+    /// Aplica los destellos directamente sobre las entidades afectadas.
+    /// Vive aquí, y no en la vista, porque se invoca desde el reloj de la
+    /// reproducción: fuera de una pasada de SwiftUI no hay `@State` que leer.
+    func applySounding(_ ids: Set<UUID>) {
+        let changed = soundingIDs.symmetricDifference(ids)
+        soundingIDs = ids
+
+        for id in changed {
+            guard let entity = nodeEntities[id],
+                  var component = entity.components[SoundNodeVisualComponent.self]
+            else { continue }
+            component.isTriggered = ids.contains(id)
+            entity.components.set(component)
+        }
+
+        if let transport, var component = transport.components[TransportVisualComponent.self] {
+            component.triggeredCount = ids.count
+            transport.components.set(component)
+        }
+
+        if let root {
+            ConnectionLineSystem.applyTriggerHighlights(in: root, triggeredIDs: ids)
+        }
     }
 
     func noteDragEnded(at time: TimeInterval) {

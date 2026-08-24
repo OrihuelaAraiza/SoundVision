@@ -34,7 +34,9 @@
 4. En la demo pulsa **Nueva pista** y confirma el diálogo: **el diálogo debe
    aparecer**. Después todos los nodos de prueba deben desaparecer.
 5. En **Añadir sonido** toca `Kick` y confirma que aparece un nodo seleccionado
-   y conectado a Play.
+   y conectado a Play. Toca ahora `Bass`: debe colgar **del Kick**, no de Play, y
+   el selector **Nace de** debe pasar a decir `Bass`. Cambia el selector a
+   `Play` y añade un tercero: ese sí debe salir del núcleo.
 6. Tira del núcleo Play dentro del espacio y suelta: debe extraerse un organismo
    nuevo en el punto donde soltaste.
 7. Selecciona un nodo y pulsa la papelera: el diálogo de borrado debe aparecer y
@@ -57,9 +59,14 @@ llegue a presentarse.
 0c. **Etiqueta.** Sin selección, el espacio no debe tener texto flotando. Haz
    pinch sobre un organismo: solo entonces aparece su lectura, y solo la suya.
 1. Pulsa **Reproducir**.
-2. **Confirma que suena algo.** Si no, mira la consola: un aviso naranja dirá si
-   las voces no llegaron a engancharse o si están conectadas pero mudas. Anota
-   cuál de los dos aparece — distinguen dos causas muy distintas.
+2. **Confirma que suena algo.** Si no, la pestaña **Reproducir** trae dos líneas
+   que hay que anotar tal cual:
+   - Un aviso naranja, si lo hay: dirá si el sistema negó la sesión de audio, si
+     ninguna voz llegó a engancharse, si están enganchadas pero el sistema no les
+     pide muestras, o si rinden sin sacar nivel. Son cuatro causas distintas.
+   - La línea gris de diagnóstico: `N voces · reloj · tasa · pico · salida`.
+     Con música sonando, el pico **no** debe decir `silencio`, y la salida debe
+     ser la que estés usando de verdad. Anótala completa.
 3. Confirma que **la primera nota suena** y no se pierde: el ataque inicial debe
    oírse completo, no entrar a medias.
 3. Confirma que las cintas alrededor de Play aceleran y ondulan sin saltos, y
@@ -128,6 +135,14 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    con la otra mano: debe responder a la primera.
 3c. Si aun así no consigues moverlo con la mano, usa los sliders de **Posición**
    del inspector y anótalo: significa que el arrastre 3D sigue fallando.
+3g. **Encadenar.** Con el selector **Nace de** en un organismo concreto, añade
+   tres sonidos seguidos: deben formar una **cadena** —cada uno colgando del
+   anterior— y no un abanico desde Play. Reproduce y confirma que entran uno tras
+   otro, no todos a la vez.
+3h. **Organismo incomunicado.** Corta la conexión que une una rama con Play y
+   selecciona un organismo de esa rama: el inspector debe avisar en naranja de
+   que Play no llega hasta ahí. Pulsa **Conectar con Play** y confirma que el
+   aviso desaparece y que vuelve a sonar al reproducir.
 4. **Cortar.** Haz pinch sobre una conexión: debe desaparecer al instante.
    Pulsa **Deshacer** en la consola y confirma que vuelve.
 5. Deshaz varias veces seguidas (corte, nodo añadido, demo cargada). Cada paso
@@ -141,7 +156,9 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    duración **no cambian** en el inspector. Desactívalo y confirma que vuelve a
    afinarse al moverlo. Acomoda toda la composición con los candados puestos y
    comprueba que suena exactamente igual que antes de ordenarla.
-8. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté detenido.
+8. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté
+   detenido. **La segunda reproducción debe sonar igual que la primera**, y al
+   detener el corte debe apagarse limpio, sin chasquido.
 9. Selecciona un nodo detenido: debe mostrar pocas partículas. Al escucharlo,
    la emisión debe intensificarse y después desaparecer sin quedar residuos.
 
@@ -165,6 +182,7 @@ La prueba es satisfactoria si:
 
 ## Datos que conviene anotar
 
+- La línea de diagnóstico de audio completa, sonando y en reposo.
 - Modelo y versión de visionOS.
 - Salida utilizada: Audio Pods, AirPods u otra ruta.
 - Volumen aproximado del sistema.

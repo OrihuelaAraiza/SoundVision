@@ -201,3 +201,60 @@ struct Composition: Codable, Equatable, Sendable {
         connections = try values.decodeIfPresent([SoundConnection].self, forKey: .connections) ?? []
     }
 }
+
+extension SoundNode {
+    /// Un valor no finito en una posición acaba dentro de la transformada de una
+    /// entidad, y ahí RealityKit no perdona. Además cualquier `Int(...)` sobre
+    /// un NaN aborta el proceso, y la app convierte pitch y volumen a entero
+    /// para mostrarlos. Se corrige al entrar, no en cada uso.
+    func sanitized() -> SoundNode {
+        func finite(_ value: Float, fallback: Float, limit: Float = 24) -> Float {
+            guard value.isFinite else { return fallback }
+            return Swift.max(-limit, Swift.min(value, limit))
+        }
+
+        var copy = self
+        copy.positionX = finite(positionX, fallback: 0, limit: 2.4)
+        copy.positionY = finite(positionY, fallback: SpatialParameterMapper.neutralHeight, limit: 2.5)
+        copy.positionZ = finite(positionZ, fallback: 0, limit: 2.4)
+        copy.rotationX = finite(rotationX, fallback: 0, limit: .pi * 2)
+        copy.rotationY = finite(rotationY, fallback: 0, limit: .pi * 2)
+        copy.rotationZ = finite(rotationZ, fallback: 0, limit: .pi * 2)
+        copy.pitch = finite(pitch, fallback: 0)
+        copy.volume = Swift.max(0, Swift.min(volume.isFinite ? volume : 0.78, 1))
+        copy.reverb = Swift.max(0, Swift.min(reverb.isFinite ? reverb : 0, 1))
+        copy.delay = Swift.max(0, Swift.min(delay.isFinite ? delay : 0, 1))
+        copy.distortion = Swift.max(0, Swift.min(distortion.isFinite ? distortion : 0, 1))
+        copy.durationBeats = durationBeats.isFinite ? Swift.max(0.0625, Swift.min(durationBeats, 32)) : 1
+        return copy
+    }
+}
+
+extension Composition {
+    /// El archivo guardado puede venir de una versión anterior, editado a mano o
+    /// escrito a medias. Nada de eso debe poder tumbar la app: identificadores
+    /// repetidos hacían caer un `Dictionary`, y una conexión hacia un nodo que
+    /// ya no existe dejaba líneas apuntando al vacío.
+    func sanitized() -> Composition {
+        var seenNodes = Set<UUID>()
+        let uniqueNodes = nodes
+            .filter { seenNodes.insert($0.id).inserted }
+            .map { $0.sanitized() }
+        let validIDs = Set(uniqueNodes.map(\.id))
+
+        var seenConnections = Set<UUID>()
+        let cleanConnections = connections.filter { connection in
+            guard validIDs.contains(connection.destinationNodeID) else { return false }
+            if let source = connection.sourceNodeID, !validIDs.contains(source) { return false }
+            return seenConnections.insert(connection.id).inserted
+        }
+
+        return Composition(
+            title: title,
+            bpm: bpm.isFinite ? Swift.max(40, Swift.min(bpm, 240)) : 120,
+            steps: steps,
+            nodes: uniqueNodes,
+            connections: cleanConnections
+        )
+    }
+}

@@ -176,7 +176,9 @@ final class SoundVisionTests: XCTestCase {
     func testCuttingAConnectionIsUndoable() {
         let state = CompositionState()
         let source = state.createNode(of: .kick)
-        let destination = state.createNode(of: .bass)
+        // Desde Play a propósito: así la conexión que se corta es la que crea
+        // esta prueba y no la que el encadenado automático ya habría puesto.
+        let destination = state.createNode(of: .bass, from: .play)
         XCTAssertTrue(state.connect(sourceID: source, destinationID: destination))
 
         let connectionCount = state.connections.count

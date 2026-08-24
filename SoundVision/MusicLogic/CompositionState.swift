@@ -2,6 +2,15 @@ import Combine
 import Foundation
 import simd
 
+/// De dónde nace un organismo nuevo.
+enum NodeOrigin: Equatable, Sendable {
+    /// Lo que la persona haya elegido en la consola. Es el caso normal.
+    case chosen
+    /// El núcleo Play, cuando lo dice el propio gesto.
+    case play
+    case node(UUID)
+}
+
 @MainActor
 final class CompositionState: ObservableObject {
     nonisolated static let playNodePosition = SIMD3<Float>(0, SpatialParameterMapper.neutralHeight, 0)
@@ -24,6 +33,12 @@ final class CompositionState: ObservableObject {
     @Published private(set) var undoLabel: String?
     /// Solo tiene valor cuando el motor de audio tiene algo que reportar.
     @Published var audioProblem: String?
+    /// Estado vivo del motor en una línea, para la pestaña Reproducir.
+    @Published var audioDiagnostics: String?
+    /// Desde qué organismo nace el siguiente sonido que se añada. `nil` es el
+    /// núcleo Play. Antes todo lo nuevo colgaba de Play sin excepción, así que
+    /// el grafo salía en abanico y no había forma de encadenar una frase.
+    @Published var connectionOriginID: UUID?
 
     let sequencer = Sequencer()
     let graphTransport = GraphTransport()
@@ -38,6 +53,7 @@ final class CompositionState: ObservableObject {
         let nodes: [SoundNode]
         let connections: [SoundConnection]
         let selectedNodeID: UUID?
+        let connectionOriginID: UUID?
         let isSpatialTestScene: Bool
     }
 
@@ -64,6 +80,44 @@ final class CompositionState: ObservableObject {
     /// quedarse sin selección desde dentro del espacio.
     func selectNode(id: UUID) {
         selectedNodeID = selectedNodeID == id ? nil : id
+        // Elegir un organismo es también decir "lo siguiente nace de aquí".
+        if selectedNodeID != nil { connectionOriginID = id }
+    }
+
+    /// Nombre del origen actual, para que la consola pueda decir en una línea
+    /// dónde va a engancharse el próximo sonido.
+    var connectionOriginName: String {
+        connectionOriginID.flatMap { node(id: $0)?.name } ?? "Play"
+    }
+
+    /// Selección desde un gesto que ya sabe a quién apunta (arrastrar, girar).
+    /// Pasa por aquí y no por `selectedNodeID` a secas para que "seleccionado"
+    /// y "origen" no puedan divergir según por dónde entres.
+    func focusNode(id: UUID) {
+        selectedNodeID = id
+        connectionOriginID = id
+    }
+
+    func setConnectionOrigin(_ id: UUID?) {
+        connectionOriginID = id.flatMap { node(id: $0) != nil ? $0 : nil }
+        statusMessage = "El siguiente sonido nacerá de \(connectionOriginName)."
+    }
+
+    /// Organismos a los que Play no llega por ningún camino. No suenan, y hasta
+    /// ahora no había manera de darse cuenta salvo por el silencio.
+    func unreachableNodeIDs() -> Set<UUID> {
+        var reachable: Set<UUID> = []
+        var pending = connections.filter { $0.sourceNodeID == nil }.map(\.destinationNodeID)
+        let outgoing = Dictionary(grouping: connections.compactMap { connection -> (UUID, UUID)? in
+            guard let source = connection.sourceNodeID else { return nil }
+            return (source, connection.destinationNodeID)
+        }, by: { $0.0 })
+
+        while let current = pending.popLast() {
+            guard reachable.insert(current).inserted else { continue }
+            pending.append(contentsOf: outgoing[current, default: []].map(\.1))
+        }
+        return Set(nodes.map(\.id)).subtracting(reachable)
     }
 
     // MARK: - Deshacer
@@ -78,6 +132,7 @@ final class CompositionState: ObservableObject {
             nodes: nodes,
             connections: connections,
             selectedNodeID: selectedNodeID,
+            connectionOriginID: connectionOriginID,
             isSpatialTestScene: isSpatialTestScene
         ))
         if undoStack.count > 24 { undoStack.removeFirst() }
@@ -90,6 +145,7 @@ final class CompositionState: ObservableObject {
         nodes = entry.nodes
         connections = entry.connections
         selectedNodeID = entry.selectedNodeID
+        connectionOriginID = entry.connectionOriginID
         isSpatialTestScene = entry.isSpatialTestScene
         undoLabel = undoStack.last?.label
         sceneContentRevision &+= 1
@@ -112,6 +168,7 @@ final class CompositionState: ObservableObject {
         nodes.removeAll { $0.id == id }
         connections.removeAll { $0.sourceNodeID == id || $0.destinationNodeID == id }
         selectedNodeID = nil
+        if connectionOriginID == id { connectionOriginID = nil }
         sceneContentRevision &+= 1
         statusMessage = "\(node.name) eliminado."
     }
@@ -179,21 +236,29 @@ final class CompositionState: ObservableObject {
     }
 
     @discardableResult
-    func createNextNode(at position: SIMD3<Float>? = nil, connectedFrom sourceID: UUID? = nil) -> UUID {
+    func createNextNode(at position: SIMD3<Float>? = nil, from origin: NodeOrigin = .chosen) -> UUID {
         let type = SoundNodeType.allCases[nodes.count % SoundNodeType.allCases.count]
-        return createNode(of: type, at: position, connectedFrom: sourceID)
+        return createNode(of: type, at: position, from: origin)
     }
 
+    /// Alta de un organismo.
+    ///
+    /// El origen se nombra explícitamente solo cuando el gesto ya lo dice —tirar
+    /// del núcleo Play, por ejemplo—. En el resto de casos manda el que la
+    /// persona haya elegido en la consola, y Play queda como punto de partida
+    /// mientras no haya ninguno.
     @discardableResult
     func createNode(
         of type: SoundNodeType,
         at position: SIMD3<Float>? = nil,
-        connectedFrom sourceID: UUID? = nil
+        from requestedOrigin: NodeOrigin = .chosen
     ) -> UUID {
+        let origin = resolve(requestedOrigin)
         let finalPosition = clamped(position ?? freeSpawnPosition())
         recordUndo("Añadir \(SoundNodeType.displayName(for: type))")
+        let name = uniqueName(for: type)
         let node = SoundNode(
-            name: SoundNodeType.displayName(for: type),
+            name: name,
             type: type,
             volume: SpatialParameterMapper.volume(forDepth: finalPosition.z),
             pitch: SpatialParameterMapper.pitch(forHeight: finalPosition.y),
@@ -202,13 +267,44 @@ final class CompositionState: ObservableObject {
             positionZ: finalPosition.z
         )
         nodes.append(node)
-        if canConnect(sourceID: sourceID, destinationID: node.id) {
-            appendConnection(sourceID: sourceID, destinationID: node.id)
+        let originName = origin.flatMap { self.node(id: $0)?.name } ?? "Play"
+        if canConnect(sourceID: origin, destinationID: node.id) {
+            appendConnection(sourceID: origin, destinationID: node.id)
         }
         selectedNodeID = node.id
+        // El nuevo pasa a ser el origen: así se encadena una frase añadiendo
+        // sonidos uno detrás de otro, sin tener que seleccionar cada vez.
+        connectionOriginID = node.id
         sceneContentRevision &+= 1
-        statusMessage = "\(SoundNodeType.displayName(for: type)) agregado. Arrástralo para cambiar pitch, volumen y duración."
+        statusMessage = "\(name) agregado desde \(originName). El siguiente nacerá de aquí."
         return node.id
+    }
+
+    /// Tres organismos llamados "Kick" son indistinguibles en el selector de
+    /// origen y en el inspector, que es justo donde hay que poder elegir uno.
+    private func uniqueName(for type: SoundNodeType) -> String {
+        let base = SoundNodeType.displayName(for: type)
+        guard nodes.contains(where: { $0.name == base }) else { return base }
+        var index = 2
+        while nodes.contains(where: { $0.name == "\(base) \(index)" }) { index += 1 }
+        return "\(base) \(index)"
+    }
+
+    /// Traduce la intención a un identificador vivo. Un origen que ya no existe
+    /// —lo borraron, o vino de una composición cargada— cae a Play en vez de
+    /// dejar el organismo nuevo colgando de la nada.
+    private func resolve(_ origin: NodeOrigin) -> UUID? {
+        switch origin {
+        case .play: nil
+        case .node(let id): node(id: id) != nil ? id : nil
+        case .chosen: connectionOriginID.flatMap { node(id: $0) != nil ? $0 : nil }
+        }
+    }
+
+    /// Rescata un organismo que quedó fuera del alcance de Play.
+    func connectToPlay(id: UUID) {
+        guard node(id: id) != nil else { return }
+        connect(sourceID: nil, destinationID: id)
     }
 
     func moveNode(id: UUID, to position: SIMD3<Float>) {
@@ -258,7 +354,9 @@ final class CompositionState: ObservableObject {
             return
         }
 
-        let nodesByID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        // Tolerante a repetidos: un archivo cargado a mano con dos nodos del
+        // mismo identificador hacía caer la app en el acto, y con Play.
+        let nodesByID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         graphTransport.start(
             nodes: nodes,
             connections: connections,
@@ -333,6 +431,7 @@ final class CompositionState: ObservableObject {
         ]
         recalculateAllConnections()
         selectedNodeID = kick.id
+        connectionOriginID = kick.id
         isSpatialTestScene = true
         testStep = 0
         sceneContentRevision &+= 1
@@ -381,7 +480,7 @@ final class CompositionState: ObservableObject {
 
     func load() {
         do {
-            let composition = try storage.load()
+            let composition = try storage.load().sanitized()
             recordUndo("Cargar composición")
             stopPlayback()
             sequencer.bpm = composition.bpm
@@ -390,6 +489,7 @@ final class CompositionState: ObservableObject {
                 ? composition.nodes.map { SoundConnection(sourceNodeID: nil, destinationNodeID: $0.id) }
                 : composition.connections
             selectedNodeID = nil
+            connectionOriginID = nil
             recalculateAllConnections()
             sceneContentRevision &+= 1
             statusMessage = "Composición espacial cargada."
@@ -409,6 +509,7 @@ final class CompositionState: ObservableObject {
         nodes = []
         connections = []
         selectedNodeID = nil
+        connectionOriginID = nil
         statusMessage = message
         isSpatialTestScene = false
         testStep = 0
@@ -519,10 +620,17 @@ final class CompositionState: ObservableObject {
     }
 
     private func clamped(_ value: SIMD3<Float>) -> SIMD3<Float> {
-        [
-            max(-2.4, min(value.x, 2.4)),
-            max(0.35, min(value.y, 2.5)),
-            max(-2.0, min(value.z, 2.4))
+        // `min`/`max` propagan NaN en vez de descartarlo, y un NaN aquí llega
+        // hasta `Int(pitch)`, que aborta el proceso. Un gesto en el límite del
+        // seguimiento de manos basta para producirlo.
+        func axis(_ value: Float, _ lower: Float, _ upper: Float, fallback: Float) -> Float {
+            guard value.isFinite else { return fallback }
+            return max(lower, min(value, upper))
+        }
+        return [
+            axis(value.x, -2.4, 2.4, fallback: 0),
+            axis(value.y, 0.35, 2.5, fallback: SpatialParameterMapper.neutralHeight),
+            axis(value.z, -2.0, 2.4, fallback: 0)
         ]
     }
 

@@ -1,3 +1,4 @@
+import os
 import RealityKit
 import UIKit
 
@@ -8,17 +9,26 @@ enum ParticleEffectSystem {
     static let nodeEmitterName = "node-energy-particles"
     static let coreEmitterName = "core-energy-particles"
 
-    private static var atlas: TextureResource?
+    /// El atlas lo carga una tarea asíncrona y lo leen los emisores al nacer,
+    /// desde el hilo que toque. Antes era un `static var` desnudo: dos hilos
+    /// podían tocarlo a la vez y ese es exactamente el tipo de carrera que en
+    /// dispositivo se manifiesta como un cierre inesperado sin traza clara.
+    private static let atlasBox = OSAllocatedUnfairLock<TextureResource?>(initialState: nil)
 
+    /// Aislada al hilo principal a propósito. Recorría el árbol de entidades y
+    /// les escribía componentes desde el ejecutor de fondo: RealityKit no es
+    /// seguro entre hilos y esa travesía era una corrupción esperando su turno.
+    @MainActor
     static func prepareAssets(in root: Entity) async {
-        if atlas == nil, let image = UIImage(named: "EnergyParticleAtlas")?.cgImage {
-            atlas = try? await TextureResource(
+        if atlasBox.withLock({ $0 == nil }), let image = UIImage(named: "EnergyParticleAtlas")?.cgImage {
+            let loaded = try? await TextureResource(
                 image: image,
                 withName: "EnergyParticleAtlas",
                 options: .init(semantic: .color, mipmapsMode: .allocateAndGenerateAll)
             )
+            atlasBox.withLock { $0 = loaded }
         }
-        guard let atlas else { return }
+        guard let atlas = atlasBox.withLock({ $0 }) else { return }
         apply(atlas: atlas, to: root)
     }
 
@@ -119,7 +129,7 @@ enum ParticleEffectSystem {
         component.mainEmitter.opacityCurve = .quickFadeInOut
         component.mainEmitter.sizeMultiplierAtEndOfLifespan = 1.35
         component.mainEmitter.sortOrder = .decreasingAge
-        component.mainEmitter.image = atlas
+        component.mainEmitter.image = atlasBox.withLock { $0 }
 
         var sequence = ParticleEmitterComponent.ParticleEmitter.ImageSequence()
         sequence.rowCount = 4
@@ -141,6 +151,7 @@ enum ParticleEffectSystem {
         }
     }
 
+    @MainActor
     private static func apply(atlas: TextureResource, to root: Entity) {
         if var component = root.components[ParticleEmitterComponent.self] {
             component.mainEmitter.image = atlas

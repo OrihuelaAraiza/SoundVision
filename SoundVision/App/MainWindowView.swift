@@ -34,6 +34,10 @@ struct MainWindowView: View {
                 Text("SOUNDVISION")
                     .font(.system(size: 44, weight: .black, design: .rounded))
                     .tracking(6)
+                    // Con el tracking, el título roza los 366 pt: si la ventana
+                    // se estrecha debe encoger, no recortarse.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 Text("Surgery of Sound")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.cyan)
@@ -41,6 +45,7 @@ struct MainWindowView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(spacing: 12) {
@@ -71,6 +76,10 @@ struct MainWindowView: View {
                 .buttonStyle(.bordered)
             }
             .disabled(isTransitioning)
+            // "Cargar composición guardada" es la etiqueta más larga: dentro de
+            // 340 pt entra, pero que encoja antes que recortarse.
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .frame(maxWidth: 340)
 
             if let message = state.statusMessage {

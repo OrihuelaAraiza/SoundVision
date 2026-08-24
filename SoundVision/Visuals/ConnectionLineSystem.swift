@@ -31,7 +31,7 @@ enum ConnectionLineSystem {
         guard container.components[ConnectionRevisionComponent.self]?.value != revision else { return }
         container.components.set(ConnectionRevisionComponent(value: revision))
 
-        let nodeMap = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        let nodeMap = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let validNames = Set(connections.map { prefix + $0.id.uuidString })
 
         for stale in container.children where stale.name.hasPrefix(prefix) && !validNames.contains(stale.name) {
@@ -66,10 +66,9 @@ enum ConnectionLineSystem {
                 container.addChild(line)
             }
 
-            let vector = destinationPosition - sourcePosition
-            let length = max(simd_length(vector), 0.001)
+            let length = SpatialSceneLayout.segmentLength(from: sourcePosition, to: destinationPosition)
             line.position = (sourcePosition + destinationPosition) / 2
-            line.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+            line.orientation = SpatialSceneLayout.segmentOrientation(from: sourcePosition, to: destinationPosition)
             line.scale = [1, length, 1]
             line.isEnabled = destination.isActive
             line.components.set(ConnectionLineComponent(
@@ -92,7 +91,7 @@ enum ConnectionLineSystem {
         connections: [SoundConnection]
     ) {
         guard let container = root.findEntity(named: containerName) else { return }
-        let nodeMap = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        let nodeMap = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         func endpoint(_ id: UUID) -> SIMD3<Float>? {
             guard let node = nodeMap[id] else { return nil }
@@ -108,12 +107,11 @@ enum ConnectionLineSystem {
                   let destination = endpoint(connection.destinationNodeID)
             else { continue }
             let source = connection.sourceNodeID.flatMap(endpoint) ?? CompositionState.playNodePosition
-            let vector = destination - source
-            let length = max(simd_length(vector), 0.001)
+            let length = SpatialSceneLayout.segmentLength(from: source, to: destination)
             let thickness = line.components[ConnectionLineComponent.self]?.isHighlighted == true ? Float(1.8) : 1
 
             line.position = (source + destination) / 2
-            line.orientation = simd_quatf(from: [0, 1, 0], to: vector / length)
+            line.orientation = SpatialSceneLayout.segmentOrientation(from: source, to: destination)
             line.scale = [thickness, length, thickness]
         }
     }

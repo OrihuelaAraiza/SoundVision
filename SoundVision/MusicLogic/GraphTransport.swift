@@ -13,7 +13,7 @@ final class GraphTransport: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published var loopPasses = 2
 
-    private var visualTasks: [Task<Void, Never>] = []
+    private var visualTask: Task<Void, Never>?
     private var completion: (() -> Void)?
 
     @discardableResult
@@ -34,36 +34,45 @@ final class GraphTransport: ObservableObject {
         guard !timeline.isEmpty else { return false }
 
         let secondsPerBeat = 60 / max(bpm, 1)
-        let nodesByID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
+        // Tolerante a identificadores repetidos: `uniqueKeysWithValues` aborta
+        // el proceso en el acto, y una composición cargada con dos nodos del
+        // mismo id convertía Play en un cierre inesperado.
+        let nodesByID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let visualLeadIn = onSchedule(timeline, secondsPerBeat) else { return false }
         isPlaying = true
         completion = onCompletion
 
-        for event in timeline {
-            guard let node = nodesByID[event.nodeID] else { continue }
-            let delay = visualLeadIn + event.beat * secondsPerBeat
-            // El destello lo sostiene quien recibe `onVisualTrigger`; llevar
-            // aquí un segundo conjunto de nodos activos duplicaba ese trabajo y
-            // publicaba un cambio por nota, reevaluando toda la interfaz.
-            visualTasks.append(Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(delay))
-                guard let self, self.isPlaying, !Task.isCancelled, node.isActive else { return }
-                onVisualTrigger(node)
-            })
-        }
+        // Una sola tarea recorre la línea de tiempo en orden. Antes se creaba
+        // una por evento —hasta 512 tareas dormidas a la vez— y todas competían
+        // por el hilo principal justo mientras sonaba la música.
+        let ordered = timeline.sorted { $0.beat < $1.beat }
+        let endBeat = ordered.last?.beat ?? 0
+        visualTask = Task { @MainActor [weak self] in
+            let clock = ContinuousClock()
+            let origin = clock.now
 
-        let endDelay = visualLeadIn + (timeline.map(\.beat).max() ?? 0) * secondsPerBeat + 1.2
-        visualTasks.append(Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(endDelay))
+            for event in ordered {
+                guard let node = nodesByID[event.nodeID] else { continue }
+                // Cada espera se mide contra el origen, no contra la anterior:
+                // así el destello número cien no acumula el retraso de los
+                // noventa y nueve anteriores.
+                let target = origin.advanced(by: .seconds(visualLeadIn + event.beat * secondsPerBeat))
+                try? await clock.sleep(until: target)
+                guard let self, self.isPlaying, !Task.isCancelled else { return }
+                if node.isActive { onVisualTrigger(node) }
+            }
+
+            let end = origin.advanced(by: .seconds(visualLeadIn + endBeat * secondsPerBeat + 1.2))
+            try? await clock.sleep(until: end)
             guard let self, !Task.isCancelled else { return }
             self.finishPlayback()
-        })
+        }
         return true
     }
 
     func stop() {
-        visualTasks.forEach { $0.cancel() }
-        visualTasks = []
+        visualTask?.cancel()
+        visualTask = nil
         isPlaying = false
         completion = nil
     }
@@ -133,8 +142,7 @@ final class GraphTransport: ObservableObject {
     }
 
     private func finishPlayback() {
-        visualTasks.forEach { $0.cancel() }
-        visualTasks = []
+        visualTask = nil
         isPlaying = false
         let callback = completion
         completion = nil
@@ -142,6 +150,6 @@ final class GraphTransport: ObservableObject {
     }
 
     deinit {
-        visualTasks.forEach { $0.cancel() }
+        visualTask?.cancel()
     }
 }

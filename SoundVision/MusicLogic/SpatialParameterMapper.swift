@@ -17,6 +17,7 @@ enum SpatialParameterMapper {
     /// semitonos continuos, así que un nodo podía quedar a +7.3 semitonos y la
     /// pieza entera sonaba microtonal por muy buena que fuese la síntesis.
     static func pitch(forHeight height: Float) -> Float {
+        guard height.isFinite else { return 0 }
         let degree = Int(((height - neutralHeight) / degreeSpacing).rounded())
         return Float(clamp(semitones(forDegree: degree), min: -24, max: 24))
     }
@@ -33,7 +34,8 @@ enum SpatialParameterMapper {
     /// musicales y no solo en semitonos.
     static func noteName(forSemitones semitones: Float) -> String {
         let names = ["Do", "Do♯", "Re", "Re♯", "Mi", "Fa", "Fa♯", "Sol", "Sol♯", "La", "La♯", "Si"]
-        let rounded = Int(semitones.rounded())
+        guard semitones.isFinite else { return "—" }
+        let rounded = Int(clamp(semitones, min: -48, max: 48).rounded())
         // La referencia es La central: el 0 de la escala.
         let absolute = rounded + 9
         let octave = Int(floor(Double(absolute) / 12)) + 4
@@ -43,7 +45,8 @@ enum SpatialParameterMapper {
 
     /// En coordenadas locales, un Z mayor está más cerca del usuario.
     static func volume(forDepth depth: Float) -> Float {
-        clamp(0.72 + depth * 0.22, min: 0.12, max: 1)
+        guard depth.isFinite else { return 0.72 }
+        return clamp(0.72 + depth * 0.22, min: 0.12, max: 1)
     }
 
     static func durationBeats(from source: SIMD3<Float>, to destination: SIMD3<Float>) -> Double {
@@ -60,7 +63,8 @@ enum SpatialParameterMapper {
     }
 
     private static func normalizedAngle(_ angle: Float) -> Float {
-        clamp(abs(angle) / .pi, min: 0, max: 1)
+        guard angle.isFinite else { return 0 }
+        return clamp(abs(angle) / .pi, min: 0, max: 1)
     }
 
     private static func clamp<T: Comparable>(_ value: T, min minimum: T, max maximum: T) -> T {

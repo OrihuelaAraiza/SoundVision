@@ -64,7 +64,13 @@ struct StudioConsoleView: View {
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            // Cede el ancho antes que los botones: si algo tiene que encoger,
+            // que sea el recuento y no la acción.
+            .layoutPriority(0)
+
+            Spacer(minLength: 8)
             // Siempre disponible mientras haya historial, en vez de un aviso
             // que se desvanece: si aparece y desaparece, hay que darse prisa.
             Button { state.undo() } label: {
@@ -73,9 +79,14 @@ struct StudioConsoleView: View {
                     systemImage: "arrow.uturn.backward"
                 )
                 .lineLimit(1)
+                .truncationMode(.tail)
+                // Etiquetas como "Deshacer vaciar el lienzo" desbordaban la
+                // fila entera y aplastaban lo que tenían al lado.
+                .frame(maxWidth: 186)
             }
             .buttonStyle(.bordered)
             .disabled(!state.canUndo)
+            .layoutPriority(1)
 
             Button(role: .cancel) { onExit() } label: {
                 Label("Salir", systemImage: "xmark")
@@ -101,6 +112,7 @@ struct StudioConsoleView: View {
                 Label("Añade un sonido para poder reproducir", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 12) {
@@ -131,6 +143,17 @@ struct StudioConsoleView: View {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // "No suena" es un síntoma con media docena de causas. Esta línea
+            // dice cuántas voces hay enganchadas, de qué reloj se fían, a qué
+            // tasa rinden, cuánto nivel están sacando y por dónde sale: con eso
+            // una prueba con el visor puesto deja de ser adivinanza.
+            if let diagnostics = state.audioDiagnostics {
+                Label(diagnostics, systemImage: "waveform.badge.magnifyingglass")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -179,6 +202,8 @@ struct StudioConsoleView: View {
                 .font(.caption.weight(.bold))
                 .tracking(1.5)
                 .foregroundStyle(.secondary)
+
+            originPicker
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(SoundNodeType.allCases, id: \.self) { type in
                     let style = NodeVisualStyle.style(for: type)
@@ -190,6 +215,8 @@ struct StudioConsoleView: View {
                                 .foregroundStyle(Color(uiColor: style.color))
                             Text(SoundNodeType.displayName(for: type))
                                 .font(.callout.weight(.medium))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                             Spacer()
                         }
                         .frame(minHeight: 38)
@@ -197,6 +224,57 @@ struct StudioConsoleView: View {
                     .buttonStyle(.bordered)
                 }
             }
+        }
+    }
+
+    /// Antes todo lo nuevo colgaba de Play, así que la composición solo podía
+    /// crecer en abanico: ocho organismos disparando a la vez desde el mismo
+    /// instante. Encadenar es lo que convierte el grafo en una frase, y para eso
+    /// hay que poder decir de dónde nace lo siguiente.
+    private var originPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(
+                selection: Binding(
+                    get: { state.connectionOriginID },
+                    set: { state.setConnectionOrigin($0) }
+                )
+            ) {
+                Text("Play · el núcleo").tag(UUID?.none)
+                ForEach(state.nodes) { node in
+                    Text(node.name).tag(UUID?.some(node.id))
+                }
+            } label: {
+                Label("Nace de", systemImage: "arrow.turn.down.right")
+            }
+            .pickerStyle(.menu)
+
+            Text("El sonido que añadas se conectará desde \(state.connectionOriginName), y pasará a ser el origen del siguiente.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.bottom, 2)
+    }
+
+    /// Un organismo al que Play no llega es un organismo mudo, y el silencio no
+    /// explica por qué. Este aviso lo dice y ofrece el remedio en el sitio.
+    @ViewBuilder
+    private func reachabilityWarning(for node: SoundNode) -> some View {
+        if state.unreachableNodeIDs().contains(node.id) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Play no llega hasta aquí: este organismo no sonará.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { state.connectToPlay(id: node.id) } label: {
+                    Label("Conectar con Play", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(.orange.opacity(0.12), in: .rect(cornerRadius: 12))
         }
     }
 
@@ -208,8 +286,11 @@ struct StudioConsoleView: View {
                     Circle()
                         .fill(Color(uiColor: NodeVisualStyle.style(for: node.type).color))
                         .frame(width: 11, height: 11)
-                    Text(node.name).font(.headline)
-                    Spacer()
+                    Text(node.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Spacer(minLength: 6)
                     Text(node.isActive ? "ACTIVO" : "MUTE")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(node.isActive ? .green : .secondary)
@@ -231,9 +312,12 @@ struct StudioConsoleView: View {
                              : "Al moverlo, la posición ajusta pitch y volumen.")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .tint(.cyan)
+
+                reachabilityWarning(for: node)
 
                 positionControls(for: node)
 
@@ -267,6 +351,7 @@ struct StudioConsoleView: View {
                 Label("Tira del punto bajo el organismo para conectarlo con otro.", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
             .background(.thinMaterial, in: .rect(cornerRadius: 18))
@@ -334,6 +419,9 @@ struct StudioConsoleView: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                // "Izquierda · Derecha" llega justo al borde de los 116 pt.
+                .minimumScaleFactor(0.7)
                 .frame(width: 116, alignment: .leading)
             Slider(
                 value: Binding(get: { value }, set: onChange),
@@ -346,10 +434,18 @@ struct StudioConsoleView: View {
     }
 
     private func parameter(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.caption.monospacedDigit().weight(.semibold))
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Spacer(minLength: 6)
+            Text(value)
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .lineLimit(1)
+                // El valor es el dato: si algo se encoge, que sea la etiqueta.
+                .layoutPriority(1)
         }
     }
 }

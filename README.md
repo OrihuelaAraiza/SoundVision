@@ -9,7 +9,10 @@ una composición musical en un grafo 3D interactivo.
 - Núcleo Play desde el que se extraen y conectan organismos sonoros.
 - Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
 - Conexiones dirigidas libres con bifurcaciones simultáneas y loops acotados.
-- Scheduling sample-accurate mediante generadores mono a 48 kHz.
+- Voces persistentes: cada organismo tiene su generador de audio vivo desde que
+  nace, y reproducir consiste solo en publicarle tiempos de ataque.
+- Scheduling sample-accurate mediante generadores mono, con la tasa real medida
+  a partir de los propios timestamps del render.
 - RealityKit Spatial Audio por nodo: HRTF personalizado, seguimiento espacial,
   acústica ambiental y atenuación de distancia administrados por Apple.
 - Ocho timbres sintetizados localmente (sin muestras de audio externas).
@@ -88,6 +91,37 @@ llamada transcendental por muestra. Fases, línea de delay y tiempos de ataque
 ocupan memoria reservada una sola vez, y los parámetros vivos cruzan desde el
 hilo principal como escalares independientes que se leen una vez por bloque.
 
+### Por qué Play sí suena
+
+**La voz de un organismo vive mientras vive el organismo.** Se engancha a su
+entidad en cuanto nace y desde ahí rinde siempre, aunque sea silencio; Play solo
+publica tiempos de ataque en su agenda.
+
+Antes las voces se creaban al pulsar Play y se destruían al detener. La línea de
+tiempo se fechaba contra el reloj del sistema *antes* de engancharlas, así que
+enganchar tenía que caber en el margen previsto. En el simulador cabía. En el
+dispositivo, con el grafo de audio todavía frío, no siempre: los primeros
+ataques quedaban en el pasado, el render los descartaba por estar fuera de
+ventana y la reproducción entera podía transcurrir en silencio mientras las
+animaciones seguían su curso, sin ningún error que lo explicara.
+
+La agenda cruza al hilo de audio por [VoiceSchedule.swift](SoundVision/Audio/VoiceSchedule.swift):
+dos losas fijas y un estado atómico que dice cuál está publicada. El hilo
+principal escribe siempre en la que no se está leyendo, de modo que una lectura
+en vuelo nunca ve una agenda a medio escribir, y nada de esto reserva memoria ni
+toma un lock. Detener no vacía la agenda: marca un instante de corte y la cola se
+desvanece en 12 ms, porque truncar la onda a mitad de ciclo se oye como un
+chasquido.
+
+La app también configura y activa explícitamente su `AVAudioSession`. No lo
+hacía, y la categoría por defecto es otra de las explicaciones clásicas de
+"pulso Play, veo la animación y no oigo nada" en hardware real.
+
+Cuando algo va mal, la pestaña **Reproducir** lo dice: cuántas voces hay
+enganchadas, de qué reloj se fían, a qué tasa rinden, qué pico están sacando y
+por qué salida. "No suena" tiene media docena de causas distintas y esa línea
+las separa sin tener que quitarse el visor.
+
 La distancia horizontal gobierna las dos caras del tiempo: cuándo entra el
 siguiente organismo y cuánto sostiene el anterior. Separar dos organismos alarga
 la nota; juntarlos la vuelve staccato. Los percusivos son la excepción: un golpe
@@ -132,6 +166,23 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 Conectar no tiene modo ni botón: se tira de un hilo y se suelta donde quieras.
 Mientras el hilo está en el aire, el destino candidato se ilumina, así que sabes
 dónde va a engancharse antes de soltar.
+
+### De dónde nace cada sonido
+
+Todo lo que se añadía desde la consola colgaba del núcleo Play sin excepción, de
+modo que la composición solo podía crecer en abanico: ocho organismos disparando
+a la vez desde el mismo instante, y ninguna forma de escribir una frase.
+
+La pestaña **Sonidos** tiene ahora un selector **Nace de**. El sonido que añadas
+se conecta desde ahí, y pasa a ser el origen del siguiente: añadir cuatro
+seguidos escribe una cadena, no un abanico. Seleccionar un organismo en el
+espacio también lo convierte en el origen, y Play sigue estando en la lista para
+empezar una rama nueva. Tirar del núcleo mantiene su significado literal: lo que
+sale de ahí nace de Play, diga lo que diga el selector.
+
+Un organismo al que Play no llega por ningún camino no suena. El inspector lo
+avisa en naranja y ofrece **Conectar con Play** en el mismo sitio, porque el
+silencio no explica por sí solo por qué falta un instrumento.
 
 La consola se organiza en tres pestañas —**Reproducir**, **Sonidos** y
 **Nodo**— para que cada pantalla quepa entera. En una sola columna con scroll,

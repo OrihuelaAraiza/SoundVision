@@ -229,9 +229,12 @@ enum NodeEntityFactory {
             text,
             extrusionDepth: 0.0008,
             font: .monospacedSystemFont(ofSize: 0.034, weight: .semibold),
-            containerFrame: CGRect(x: 0, y: 0, width: 0.5, height: 0.07),
+            // "Hi-hat   +12 st   100%" mide ~0.45 m a este cuerpo, así que el
+            // marco deja holgura. Y si algún caso llega al borde, se trunca con
+            // puntos suspensivos en vez de cortarse a mitad de glifo.
+            containerFrame: CGRect(x: 0, y: 0, width: 0.58, height: 0.075),
             alignment: .left,
-            lineBreakMode: .byClipping
+            lineBreakMode: .byTruncatingTail
         )
         let label = ModelEntity(
             mesh: mesh,
