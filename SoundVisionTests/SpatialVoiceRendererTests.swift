@@ -239,6 +239,16 @@ final class SpatialVoiceRendererTests: XCTestCase {
         XCTAssertEqual([plan.attacks[0], plan.attacks[1], plan.attacks[2]], [1, 2, 3])
     }
 
+    func testOneVoiceCanKeepTheWholeBoundedGraphSchedule() {
+        let schedule = VoiceSchedule()
+        schedule.publish((0..<512).map(Double.init))
+        let plan = schedule.snapshot()
+
+        XCTAssertEqual(plan.count, 512)
+        XCTAssertEqual(plan.attacks[0], 0)
+        XCTAssertEqual(plan.attacks[511], 511)
+    }
+
     /// Ejecuta un bloque del callback real y devuelve las muestras producidas.
     private func render(
         _ renderer: SpatialVoiceRenderer,

@@ -62,7 +62,12 @@ final class GraphTransport: ObservableObject {
                 if node.isActive { onVisualTrigger(node) }
             }
 
-            let end = origin.advanced(by: .seconds(visualLeadIn + endBeat * secondsPerBeat + 1.2))
+            // La última voz puede ser un Pad sostenido. Cerrar la sesión con una
+            // cola fija de 1.2 s truncaba notas perfectamente válidas y hacía
+            // parecer que algunos organismos no se reproducían completos.
+            let end = origin.advanced(by: .seconds(
+                visualLeadIn + endBeat * secondsPerBeat + VoiceSynthesis.maximumDuration + 0.15
+            ))
             try? await clock.sleep(until: end)
             guard let self, !Task.isCancelled else { return }
             self.finishPlayback()
@@ -100,13 +105,15 @@ final class GraphTransport: ObservableObject {
             else { return nil }
             return connection
         }, by: { $0.sourceNodeID! })
-        let roots = connections.filter {
+        let root = connections.first {
             $0.sourceNodeID == nil && validNodeIDs.contains($0.destinationNodeID)
         }
 
-        var pending = roots.map {
-            PendingVisit(nodeID: $0.destinationNodeID, beat: 0, traversalCounts: [:])
-        }
+        // Defensa en profundidad: aunque un archivo hostil consiguiera saltarse
+        // la sanitización, PLAY jamás dispara más de una rama.
+        var pending = root.map {
+            [PendingVisit(nodeID: $0.destinationNodeID, beat: 0, traversalCounts: [:])]
+        } ?? []
         var result: [GraphPlaybackEvent] = []
         let passLimit = max(1, min(loopPasses, 8))
 
@@ -124,9 +131,12 @@ final class GraphTransport: ObservableObject {
                 guard traversed < passLimit else { continue }
                 var counts = visit.traversalCounts
                 counts[connection.id] = traversed + 1
+                let duration = connection.durationBeats.isFinite
+                    ? max(0.0625, min(connection.durationBeats, 32))
+                    : 1
                 pending.append(PendingVisit(
                     nodeID: connection.destinationNodeID,
-                    beat: visit.beat + max(0.0625, connection.durationBeats),
+                    beat: visit.beat + duration,
                     traversalCounts: counts
                 ))
             }

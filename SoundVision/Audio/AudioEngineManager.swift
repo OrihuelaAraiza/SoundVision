@@ -23,7 +23,7 @@ struct SpatialAudioSession: Identifiable, Sendable {
         // agenda antes del primer ataque. Ya no incluye el enganche del audio:
         // las voces están vivas desde que existe el organismo, así que aquí solo
         // se paga una pasada de interfaz.
-        leadInSeconds: TimeInterval = 0.3
+        leadInSeconds: TimeInterval = 0.45
     ) {
         self.id = id
         self.nodes = nodes
@@ -56,6 +56,11 @@ final class AudioEngineManager: ObservableObject {
         weak var entity: Entity?
         var appliedGain: Double = .nan
         var appliedReverb: Double = .nan
+        /// Una voz puede terminar de engancharse una pasada de interfaz después
+        /// de que Play haya publicado la sesión. Llevar esta marca por voz evita
+        /// que ese organismo se quede sin agenda solo porque sus compañeros ya
+        /// la recibieron.
+        var publishedSessionID: UUID?
     }
 
     /// Techo de fuentes espaciales simultáneas. Cada voz es una fuente de audio
@@ -66,6 +71,7 @@ final class AudioEngineManager: ObservableObject {
 
     private var voices: [UUID: Voice] = [:]
     private var publishedSessionID: UUID?
+    private var publishedStartSeconds: Double?
     private var secondsPerBeat: Double = 0.5
     private var expectedVoiceCount = 0
     private var requestedVoiceCount = 0
@@ -74,8 +80,9 @@ final class AudioEngineManager: ObservableObject {
     private var isStalled = false
 
     /// Prepara la salida del sistema. Idempotente y barata.
-    func prepare() {
-        AudioOutputSession.activate()
+    @discardableResult
+    func prepare(force: Bool = false) -> Bool {
+        AudioOutputSession.activate(force: force)
     }
 
     // MARK: - Ciclo de vida de las voces
@@ -84,8 +91,12 @@ final class AudioEngineManager: ObservableObject {
     /// de que la escena elimine sus entidades: una fuente de audio cuya entidad
     /// desaparece sin haberse detenido deja audio colgado.
     func releaseVoices(keeping ids: Set<UUID>) {
-        for (nodeID, voice) in voices where !ids.contains(nodeID) {
-            voice.controller.stop()
+        // No se muta un Dictionary mientras su iterador está vivo. En Swift esa
+        // combinación no ofrece garantías y coincidía con cierres al cambiar de
+        // demo o borrar organismos durante una cola de audio.
+        let removedIDs = voices.keys.filter { !ids.contains($0) }
+        for nodeID in removedIDs {
+            voices[nodeID]?.controller.stop()
             voices[nodeID] = nil
         }
     }
@@ -99,9 +110,16 @@ final class AudioEngineManager: ObservableObject {
     ) {
         requestedVoiceCount = nodes.count
         expectedVoiceCount = min(nodes.count, Self.maximumVoices)
-        guard !nodes.isEmpty else { return }
-        prepare()
+        guard !nodes.isEmpty else {
+            attachFailure = nil
+            return
+        }
+        guard prepare() else {
+            attachFailure = AudioOutputSession.problem ?? "la sesión de salida no está disponible"
+            return
+        }
 
+        var firstFailure: String?
         for node in nodes.prefix(Self.maximumVoices) {
             guard let entity = entityProvider(node.id) else { continue }
             // Una entidad reconstruida (deshacer, cargar, demo) deja la voz
@@ -127,19 +145,44 @@ final class AudioEngineManager: ObservableObject {
                 // evita que la primera prueba física resulte agresiva.
                 controller.gain = -6
                 controller.play()
-                voices[node.id] = Voice(renderer: renderer, controller: controller, entity: entity)
-                attachFailure = nil
+                voices[node.id] = Voice(
+                    renderer: renderer,
+                    controller: controller,
+                    entity: entity,
+                    publishedSessionID: nil
+                )
             } catch {
-                attachFailure = error.localizedDescription
+                if firstFailure == nil { firstFailure = error.localizedDescription }
                 print("SoundVision RealityKit spatial audio: \(error.localizedDescription)")
             }
         }
+        attachFailure = firstFailure
     }
 
     func stopAll() {
+        tearDownVoices()
+        AudioOutputSession.deactivate()
+    }
+
+    /// Una interrupción o cambio de dispositivo invalida tanto la sesión como
+    /// los controladores de RealityKit. Se reconstruyen en la siguiente pasada
+    /// de RealityView; intentar reutilizarlos es una fuente conocida de silencio.
+    func suspendForAudioInterruption() {
+        tearDownVoices()
+        AudioOutputSession.invalidate()
+    }
+
+    func recoverFromAudioEnvironmentChange(resetConfiguration: Bool = false) {
+        tearDownVoices()
+        AudioOutputSession.invalidate(configurationToo: resetConfiguration)
+        _ = prepare(force: true)
+    }
+
+    private func tearDownVoices() {
         voices.values.forEach { $0.controller.stop() }
         voices = [:]
         publishedSessionID = nil
+        publishedStartSeconds = nil
         expectedVoiceCount = 0
         requestedVoiceCount = 0
         lastBlockCount = 0
@@ -149,20 +192,36 @@ final class AudioEngineManager: ObservableObject {
 
     // MARK: - Reproducción
 
+    func updateTempo(bpm: Double) {
+        let safeBPM = bpm.isFinite ? max(1, bpm) : 120
+        secondsPerBeat = 60 / safeBPM
+    }
+
     /// Reparte la línea de tiempo entre las voces vivas. Sin reenganches, sin
     /// reservas en el camino crítico: cada voz recibe sus instantes de ataque.
     func publish(session: SpatialAudioSession?) {
-        guard session?.id != publishedSessionID else { return }
-        publishedSessionID = session?.id
-
         guard let session else {
+            guard publishedSessionID != nil else { return }
             let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-            voices.values.forEach { $0.renderer.schedule.stop(at: now) }
+            for nodeID in Array(voices.keys) {
+                guard var voice = voices[nodeID] else { continue }
+                voice.renderer.schedule.stop(at: now)
+                voice.publishedSessionID = nil
+                voices[nodeID] = voice
+            }
+            publishedSessionID = nil
+            publishedStartSeconds = nil
             return
         }
 
-        prepare()
+        guard prepare() else {
+            voices.values.forEach { $0.renderer.schedule.clear() }
+            return
+        }
         secondsPerBeat = session.secondsPerBeat
+
+        let isNewSession = session.id != publishedSessionID
+        publishedSessionID = session.id
 
         // Red de seguridad contra una publicación tardía. La sesión se fecha al
         // pulsar Play y llega aquí en la siguiente pasada de SwiftUI; si esa
@@ -171,16 +230,28 @@ final class AudioEngineManager: ObservableObject {
         // el arranque de la pieza, se desplaza la línea entera: como mucho, la
         // imagen adelanta al sonido unos milisegundos.
         let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
-        let start = max(AVAudioTime.seconds(forHostTime: session.startHostTime), now + 0.06)
+        let start: Double
+        if isNewSession || publishedStartSeconds == nil {
+            start = max(AVAudioTime.seconds(forHostTime: session.startHostTime), now + 0.06)
+            publishedStartSeconds = start
+        } else {
+            start = publishedStartSeconds ?? now + 0.06
+        }
         let activeIDs = Set(session.nodes.filter(\.isActive).map(\.id))
         let eventsByNode = Dictionary(grouping: session.events, by: \.nodeID)
 
-        for (nodeID, voice) in voices {
+        for nodeID in Array(voices.keys) {
+            guard var voice = voices[nodeID] else { continue }
+            guard isNewSession || voice.publishedSessionID != session.id else { continue }
             guard activeIDs.contains(nodeID), let events = eventsByNode[nodeID] else {
                 voice.renderer.schedule.clear()
+                voice.publishedSessionID = session.id
+                voices[nodeID] = voice
                 continue
             }
             voice.renderer.schedule.publish(events.map { start + $0.beat * session.secondsPerBeat })
+            voice.publishedSessionID = session.id
+            voices[nodeID] = voice
         }
     }
 

@@ -4,10 +4,8 @@ import XCTest
 
 /// Cubre de dónde nace cada organismo nuevo.
 ///
-/// Hasta ahora todo lo que se añadía colgaba del núcleo Play sin excepción, de
-/// modo que la composición solo podía crecer en abanico: ocho organismos
-/// disparando a la vez desde el mismo instante. Encadenar es lo que convierte el
-/// grafo en una frase.
+/// PLAY es una entrada única. El resto del grafo solo cambia cuando la persona
+/// conecta organismos explícitamente.
 @MainActor
 final class ConnectionGraphTests: XCTestCase {
     func testFirstSoundHangsFromPlayBecauseThereIsNothingElse() {
@@ -17,78 +15,66 @@ final class ConnectionGraphTests: XCTestCase {
         XCTAssertEqual(state.connections.count, 1)
         XCTAssertNil(state.connections.first?.sourceNodeID)
         XCTAssertEqual(state.connections.first?.destinationNodeID, kick)
-        XCTAssertEqual(state.connectionOriginID, kick, "El recién nacido pasa a ser el origen")
+        XCTAssertEqual(state.playEntryNodeID, kick)
     }
 
-    func testEachNewSoundChainsFromThePreviousOne() {
+    func testNewSoundsStayUnconnectedUntilTheUserDecides() {
         let state = CompositionState()
         let kick = state.createNode(of: .kick)
         let bass = state.createNode(of: .bass)
         let pad = state.createNode(of: .pad)
 
-        XCTAssertEqual(state.connections.count, 3)
-        XCTAssertEqual(state.connections[1].sourceNodeID, kick)
-        XCTAssertEqual(state.connections[1].destinationNodeID, bass)
-        XCTAssertEqual(state.connections[2].sourceNodeID, bass)
-        XCTAssertEqual(state.connections[2].destinationNodeID, pad)
-        XCTAssertTrue(state.unreachableNodeIDs().isEmpty, "La cadena entera cuelga de Play")
+        XCTAssertEqual(state.connections.count, 1)
+        XCTAssertEqual(state.playEntryNodeID, kick)
+        XCTAssertEqual(state.unreachableNodeIDs(), [bass, pad])
     }
 
-    func testChosenOriginDecidesWhereTheNextSoundHangs() {
+    func testUserConnectionsBuildTheChain() {
         let state = CompositionState()
         let kick = state.createNode(of: .kick)
         let bass = state.createNode(of: .bass)
-
-        state.setConnectionOrigin(kick)
         let hat = state.createNode(of: .hiHat)
 
-        XCTAssertEqual(state.connections.last?.sourceNodeID, kick)
-        XCTAssertEqual(state.connections.last?.destinationNodeID, hat)
-        XCTAssertNotEqual(state.connections.last?.sourceNodeID, bass)
+        XCTAssertTrue(state.connect(sourceID: kick, destinationID: bass))
+        XCTAssertTrue(state.connect(sourceID: bass, destinationID: hat))
+        XCTAssertTrue(state.unreachableNodeIDs().isEmpty)
     }
 
-    func testPlayCanBeChosenAgainAsTheOrigin() {
+    func testPlayRejectsASecondOutgoingConnection() {
         let state = CompositionState()
         state.createNode(of: .kick)
-        state.setConnectionOrigin(nil)
         let clap = state.createNode(of: .clap)
 
-        XCTAssertTrue(state.connections.contains { $0.sourceNodeID == nil && $0.destinationNodeID == clap })
+        XCTAssertFalse(state.connect(sourceID: nil, destinationID: clap))
+        XCTAssertEqual(state.connections.filter { $0.sourceNodeID == nil }.count, 1)
     }
 
-    /// Tirar del núcleo dice por sí mismo de dónde nace, sin importar lo que
-    /// esté elegido en la consola.
-    func testPullingFromTheCoreAlwaysHangsFromPlay() {
+    func testAdditionalNodesNeverCreateAnotherPlayExit() {
         let state = CompositionState()
-        let kick = state.createNode(of: .kick)
-        XCTAssertEqual(state.connectionOriginID, kick)
+        state.createNode(of: .kick)
 
-        let pulled = state.createNextNode(at: [0.8, 1.3, 0.4], from: .play)
-        XCTAssertTrue(state.connections.contains { $0.sourceNodeID == nil && $0.destinationNodeID == pulled })
+        let additional = state.createNextNode(at: [0.8, 1.3, 0.4])
+        XCTAssertFalse(state.connections.contains { $0.sourceNodeID == nil && $0.destinationNodeID == additional })
+        XCTAssertEqual(state.connections.filter { $0.sourceNodeID == nil }.count, 1)
     }
 
-    /// Seleccionar un organismo es también decir "lo siguiente nace de aquí".
-    func testSelectingANodeMakesItTheOrigin() {
+    func testSelectingANodeDoesNotCreateConnections() {
         let state = CompositionState()
         let kick = state.createNode(of: .kick)
         state.createNode(of: .bass)
 
         state.selectNode(id: kick)
-        XCTAssertEqual(state.connectionOriginID, kick)
-
-        let lead = state.createNode(of: .lead)
-        XCTAssertEqual(state.connections.last?.sourceNodeID, kick)
-        XCTAssertEqual(state.connections.last?.destinationNodeID, lead)
+        state.createNode(of: .lead)
+        XCTAssertEqual(state.connections.count, 1)
     }
 
-    /// Un origen borrado no puede dejar huérfano al siguiente organismo.
-    func testDeletingTheOriginFallsBackToPlay() {
+    func testDeletingThePlayEntryLetsTheNextNodeBecomeTheEntry() {
         let state = CompositionState()
         let kick = state.createNode(of: .kick)
         state.selectedNodeID = kick
         state.deleteSelectedNode()
 
-        XCTAssertNil(state.connectionOriginID)
+        XCTAssertNil(state.playEntryNodeID)
         let bass = state.createNode(of: .bass)
         XCTAssertTrue(state.connections.contains { $0.sourceNodeID == nil && $0.destinationNodeID == bass })
     }
@@ -101,6 +87,7 @@ final class ConnectionGraphTests: XCTestCase {
         let state = CompositionState()
         let kick = state.createNode(of: .kick)
         let bass = state.createNode(of: .bass)
+        state.connect(sourceID: kick, destinationID: bass)
         XCTAssertTrue(state.unreachableNodeIDs().isEmpty)
 
         guard let root = state.connections.first(where: { $0.sourceNodeID == nil })?.id else {
@@ -120,6 +107,7 @@ final class ConnectionGraphTests: XCTestCase {
         let state = CompositionState()
         let first = state.createNode(of: .kick)
         let second = state.createNode(of: .bass)
+        state.connect(sourceID: first, destinationID: second)
         state.connect(sourceID: second, destinationID: first)
 
         guard let root = state.connections.first(where: { $0.sourceNodeID == nil })?.id else {
@@ -154,6 +142,55 @@ final class ConnectionGraphTests: XCTestCase {
         XCTAssertEqual(composition.bpm, 120)
     }
 
+    func testSanitizingKeepsOnlyOnePlayEntry() {
+        let kick = SoundNode(name: "Kick", type: .kick, positionX: 0, positionY: 1.25, positionZ: 0)
+        let bass = SoundNode(name: "Bass", type: .bass, positionX: 0.8, positionY: 1.25, positionZ: 0)
+        let clean = Composition(
+            title: "Abanico antiguo",
+            bpm: 120,
+            steps: 16,
+            nodes: [kick, bass],
+            connections: [
+                SoundConnection(sourceNodeID: nil, destinationNodeID: kick.id),
+                SoundConnection(sourceNodeID: nil, destinationNodeID: bass.id)
+            ]
+        ).sanitized()
+
+        XCTAssertEqual(clean.connections.filter { $0.sourceNodeID == nil }.count, 1)
+        XCTAssertEqual(clean.connections.first?.destinationNodeID, kick.id)
+    }
+
+    func testSanitizingGraphWithoutEntryRescuesOnlyTheFirstNode() {
+        let kick = SoundNode(name: "Kick", type: .kick, positionX: 0, positionY: 1.25, positionZ: 0)
+        let bass = SoundNode(name: "Bass", type: .bass, positionX: 0.8, positionY: 1.25, positionZ: 0)
+        let clean = Composition(
+            title: "Sin entrada",
+            bpm: 120,
+            steps: 16,
+            nodes: [kick, bass],
+            connections: []
+        ).sanitized()
+
+        XCTAssertEqual(clean.connections.count, 1)
+        XCTAssertNil(clean.connections[0].sourceNodeID)
+        XCTAssertEqual(clean.connections[0].destinationNodeID, kick.id)
+    }
+
+    func testTransportDefensivelyIgnoresAdditionalPlayEntries() {
+        let kick = SoundNode(name: "Kick", type: .kick, positionX: 0, positionY: 1.25, positionZ: 0)
+        let bass = SoundNode(name: "Bass", type: .bass, positionX: 0.8, positionY: 1.25, positionZ: 0)
+        let schedule = GraphTransport.makeSchedule(
+            nodes: [kick, bass],
+            connections: [
+                SoundConnection(sourceNodeID: nil, destinationNodeID: kick.id),
+                SoundConnection(sourceNodeID: nil, destinationNodeID: bass.id)
+            ],
+            loopPasses: 1
+        )
+
+        XCTAssertEqual(schedule, [GraphPlaybackEvent(nodeID: kick.id, beat: 0)])
+    }
+
     /// Un NaN en una posición acaba dentro de una transformada de RealityKit y,
     /// antes de eso, dentro de un `Int(...)` que aborta el proceso.
     func testNonFiniteValuesNeverReachTheComposition() {
@@ -184,6 +221,20 @@ final class ConnectionGraphTests: XCTestCase {
         XCTAssertTrue(node.positionY.isFinite)
         XCTAssertTrue(node.pitch.isFinite)
         XCTAssertTrue(node.volume.isFinite)
+    }
+
+    func testNonFiniteRotationCannotPoisonVisualOrAudioParameters() {
+        let state = CompositionState()
+        let id = state.createNode(of: .fx)
+        state.rotateNode(id: id, addingTo: .zero, delta: [.nan, .infinity, -.infinity])
+
+        guard let node = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertTrue(node.rotationX.isFinite)
+        XCTAssertTrue(node.rotationY.isFinite)
+        XCTAssertTrue(node.rotationZ.isFinite)
+        XCTAssertTrue(node.reverb.isFinite)
+        XCTAssertTrue(node.delay.isFinite)
+        XCTAssertTrue(node.distortion.isFinite)
     }
 
     /// Un organismo justo encima del núcleo produce un vector nulo, y de ahí

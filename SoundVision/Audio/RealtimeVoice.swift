@@ -1,6 +1,7 @@
 import AVFAudio
 import Foundation
 import RealityKit
+import Synchronization
 
 /// Parámetros que la mano puede cambiar mientras la música suena.
 ///
@@ -11,25 +12,46 @@ import RealityKit
 /// diferencia inaudible. Cada campo se lee **una vez por bloque** y se desliza
 /// hacia su destino, de modo que ni siquiera un salto brusco produce un clic.
 final class LiveVoiceParameters: @unchecked Sendable {
-    var frequency: Double = 440
-    var heldSeconds: Double = 1
-    var delayAmount: Float = 0
-    var distortionAmount: Float = 0
+    struct Snapshot {
+        let frequency: Double
+        let heldSeconds: Double
+        let delayAmount: Float
+        let distortionAmount: Float
+        let isMuted: Bool
+    }
+
+    private let frequencyBits = Atomic<UInt64>(Double(440).bitPattern)
+    private let heldSecondsBits = Atomic<UInt64>(Double(1).bitPattern)
+    private let delayBits = Atomic<UInt32>(Float(0).bitPattern)
+    private let distortionBits = Atomic<UInt32>(Float(0).bitPattern)
     /// Un organismo muteado conserva su voz enganchada, pero no suena. Quitarle
     /// la voz obligaría a volver a engancharla al desmutear, que es justo el
     /// trabajo que ya no queremos tener en el camino de Play.
-    var isMuted = false
+    private let mutedValue = Atomic<UInt32>(0)
 
     init(node: SoundNode, heldSeconds: Double) {
         update(from: node, heldSeconds: heldSeconds)
     }
 
     func update(from node: SoundNode, heldSeconds: Double) {
-        frequency = VoiceSynthesis.frequency(for: node.type, pitch: node.pitch)
-        self.heldSeconds = heldSeconds
-        delayAmount = node.delay
-        distortionAmount = node.distortion
-        isMuted = !node.isActive
+        frequencyBits.store(VoiceSynthesis.frequency(for: node.type, pitch: node.pitch).bitPattern, ordering: .releasing)
+        heldSecondsBits.store(heldSeconds.bitPattern, ordering: .releasing)
+        delayBits.store(node.delay.bitPattern, ordering: .releasing)
+        distortionBits.store(node.distortion.bitPattern, ordering: .releasing)
+        mutedValue.store(node.isActive ? 0 : 1, ordering: .releasing)
+    }
+
+    /// El render toma una sola fotografía por bloque. Además de eliminar carreras
+    /// de datos, evita mezclar cinco lecturas de instantes distintos.
+    @inline(__always)
+    func snapshot() -> Snapshot {
+        Snapshot(
+            frequency: Double(bitPattern: frequencyBits.load(ordering: .acquiring)),
+            heldSeconds: Double(bitPattern: heldSecondsBits.load(ordering: .acquiring)),
+            delayAmount: Float(bitPattern: delayBits.load(ordering: .acquiring)),
+            distortionAmount: Float(bitPattern: distortionBits.load(ordering: .acquiring)),
+            isMuted: mutedValue.load(ordering: .acquiring) != 0
+        )
     }
 }
 
@@ -84,17 +106,26 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     /// desde el principal: son escalares alineados e independientes, sin
     /// ninguna invariante entre ellos, y sirven para *informar*, no para
     /// decidir nada dentro del render.
-    private(set) var didRenderAudibleSample = false
-    private(set) var renderedBlocks = 0
-    private(set) var peakLevel: Float = 0
-    private(set) var sampleRate = 48_000.0
-    var usesFallbackClock: Bool { resolvedClock == .internalCounter }
+    private let audibleValue = Atomic<UInt32>(0)
+    private let renderedBlockValue = Atomic<UInt64>(0)
+    private let peakBits = Atomic<UInt32>(Float(0).bitPattern)
+    private let sampleRateBits = Atomic<UInt64>(Double(48_000).bitPattern)
+    private let clockValue = Atomic<UInt32>(0)
+    private var audioRenderedBlocks: UInt64 = 0
+    private var audioDidRenderAudibleSample = false
+    private var renderSampleRate = 48_000.0
+
+    var didRenderAudibleSample: Bool { audibleValue.load(ordering: .acquiring) != 0 }
+    var renderedBlocks: Int { Int(renderedBlockValue.load(ordering: .acquiring)) }
+    var peakLevel: Float { Float(bitPattern: peakBits.load(ordering: .acquiring)) }
+    var sampleRate: Double { Double(bitPattern: sampleRateBits.load(ordering: .acquiring)) }
+    var usesFallbackClock: Bool { clockValue.load(ordering: .acquiring) == 2 }
 
     var clockDescription: String {
-        switch resolvedClock {
-        case .undecided: "sin arrancar"
-        case .hostTimestamp: "reloj del host"
-        case .internalCounter: "reloj propio"
+        switch clockValue.load(ordering: .acquiring) {
+        case 1: "reloj del host"
+        case 2: "reloj propio"
+        default: "sin arrancar"
         }
     }
 
@@ -108,7 +139,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             VoiceSynthesis.maximumDuration - spec.release
         )
         parameters = LiveVoiceParameters(node: node, heldSeconds: held)
-        smoothedFrequency = parameters.frequency
+        smoothedFrequency = parameters.snapshot().frequency
 
         partialCount = spec.partials.count
         partialMultiples = .allocate(capacity: partialCount)
@@ -121,7 +152,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
         }
 
         // Espacio para los dos ecos del delay más largo posible.
-        delayCapacity = Int(1.2 * sampleRate)
+        delayCapacity = Int(1.2 * renderSampleRate)
         delayLine = .allocate(capacity: delayCapacity)
         delayLine.initialize(repeating: 0, count: delayCapacity)
     }
@@ -141,10 +172,10 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     }
 
     /// Duración total de una nota con los parámetros actuales.
-    private var noteDuration: Double {
+    private func noteDuration(heldSeconds: Double) -> Double {
         spec.isPercussive
             ? VoiceSynthesis.percussiveDuration(for: type)
-            : parameters.heldSeconds + spec.release
+            : heldSeconds + spec.release
     }
 
     var render: Audio.GeneratorRenderHandler {
@@ -160,7 +191,8 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
             let frames = Int(frameCount)
             let blockStart = self.blockStartSeconds(from: timestamp.pointee, frames: frames)
-            renderedBlocks &+= 1
+            audioRenderedBlocks &+= 1
+            renderedBlockValue.store(audioRenderedBlocks, ordering: .releasing)
             defer { renderedFrames += Double(frames) }
 
             let plan = schedule.snapshot()
@@ -168,24 +200,25 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             // entraría barriendo desde la altura que tenía la anterior.
             if plan.generation != lastGeneration {
                 lastGeneration = plan.generation
-                smoothedFrequency = parameters.frequency
+                smoothedFrequency = parameters.snapshot().frequency
             }
 
             // Los parámetros vivos se leen una vez por bloque y se deslizan
             // hacia su destino muestra a muestra: así un cambio brusco de
             // altura se oye como un glissando corto y no como un clic.
-            let targetFrequency = parameters.frequency
-            let targetDelay = parameters.isMuted ? 0 : parameters.delayAmount
-            let targetDrive = 1 + parameters.distortionAmount * 8
-            let duration = noteDuration
-            let blockEnd = blockStart + Double(frames) / sampleRate
+            let live = parameters.snapshot()
+            let targetFrequency = live.frequency
+            let targetDelay = live.isMuted ? 0 : live.delayAmount
+            let targetDrive = 1 + live.distortionAmount * 8
+            let duration = noteDuration(heldSeconds: live.heldSeconds)
+            let blockEnd = blockStart + Double(frames) / renderSampleRate
             let fadeEnd = plan.stopTime + Self.stopFadeSeconds
 
             // Ventana de ataques que pueden sonar en este bloque. Nada que haya
             // sido cortado por Detener entra aquí.
             let lower = lowerBound(for: blockStart - duration, in: plan)
             let upper = lowerBound(for: min(blockEnd, plan.stopTime), in: plan)
-            let hasNotes = lower < upper && !parameters.isMuted && blockStart < fadeEnd
+            let hasNotes = lower < upper && !live.isMuted && blockStart < fadeEnd
             let hasDelayTail = smoothedDelay > 0.001 && silentFrames < delayCapacity
 
             if !hasNotes && !hasDelayTail {
@@ -205,7 +238,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             for buffer in buffers {
                 guard let data = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
                 for frame in 0..<frames {
-                    let absoluteTime = blockStart + Double(frame) / sampleRate
+                    let absoluteTime = blockStart + Double(frame) / renderSampleRate
 
                     smoothedFrequency += (targetFrequency - smoothedFrequency) * 0.002
                     smoothedDelay += (targetDelay - smoothedDelay) * 0.002
@@ -215,7 +248,14 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                     if hasNotes {
                         dry = spec.isPercussive
                             ? percussiveSample(at: absoluteTime, lower: lower, upper: upper, plan: plan)
-                            : tonalSample(at: absoluteTime, lower: lower, upper: upper, duration: duration, plan: plan)
+                            : tonalSample(
+                                at: absoluteTime,
+                                lower: lower,
+                                upper: upper,
+                                duration: duration,
+                                heldSeconds: live.heldSeconds,
+                                plan: plan
+                            )
                         dry *= stopGain(at: absoluteTime, stopTime: plan.stopTime)
                     } else if !spec.isPercussive {
                         // Mantén las fases avanzando aunque no suene nada, para
@@ -232,7 +272,6 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                     let out = max(-0.85, min(shaped / (1 + (smoothedDrive - 1) * 0.35), 0.85))
 
                     if out != 0 {
-                        didRenderAudibleSample = true
                         blockHadSignal = true
                         blockPeak = max(blockPeak, abs(out))
                     }
@@ -243,7 +282,12 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             silentFrames = blockHadSignal ? 0 : silentFrames &+ frames
             // Caída lenta para que la consola muestre un pico legible y no un
             // valor que parpadea con cada bloque.
-            peakLevel = max(blockPeak, peakLevel * 0.86)
+            let nextPeak = max(blockPeak, peakLevel * 0.86)
+            peakBits.store(nextPeak.bitPattern, ordering: .releasing)
+            if blockHadSignal, !audioDidRenderAudibleSample {
+                audioDidRenderAudibleSample = true
+                audibleValue.store(1, ordering: .releasing)
+            }
             isSilence.pointee = ObjCBool(!blockHadSignal)
             return noErr
         }
@@ -267,15 +311,16 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             delayWriteIndex = (delayWriteIndex + 1) % delayCapacity
         }
         for partial in 0..<partialCount {
-            phases[partial] += smoothedFrequency * partialMultiples[partial] * Double(frames) / sampleRate
+            phases[partial] += smoothedFrequency * partialMultiples[partial] * Double(frames) / renderSampleRate
             phases[partial] -= floor(phases[partial])
         }
         silentFrames &+= frames
         filterState = 0
         // El pico también decae aquí. Si no, al detener se congelaba el último
         // valor y el diagnóstico seguía diciendo que salía nivel.
-        peakLevel *= 0.86
-        if peakLevel < 0.0001 { peakLevel = 0 }
+        var nextPeak = peakLevel * 0.86
+        if nextPeak < 0.0001 { nextPeak = 0 }
+        peakBits.store(nextPeak.bitPattern, ordering: .releasing)
     }
 
     /// Desvanecido de Detener. Antes del corte deja pasar todo; después baja en
@@ -297,6 +342,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
         lower: Int,
         upper: Int,
         duration: Double,
+        heldSeconds: Double,
         plan: VoiceSchedule.Snapshot
     ) -> Float {
         var envelopeSum: Float = 0
@@ -306,13 +352,13 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             envelopeSum += VoiceSynthesis.envelope(
                 at: local,
                 spec: spec,
-                held: parameters.heldSeconds
+                held: heldSeconds
             )
         }
 
         var oscillator: Float = 0
         for partial in 0..<partialCount {
-            phases[partial] += smoothedFrequency * partialMultiples[partial] / sampleRate
+            phases[partial] += smoothedFrequency * partialMultiples[partial] / renderSampleRate
             if phases[partial] > 1 { phases[partial] -= floor(phases[partial]) }
             oscillator += VoiceSynthesis.sine(cycles: phases[partial]) * partialAmplitudes[partial]
         }
@@ -329,7 +375,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     @inline(__always)
     private func advancePhases() {
         for partial in 0..<partialCount {
-            phases[partial] += smoothedFrequency * partialMultiples[partial] / sampleRate
+            phases[partial] += smoothedFrequency * partialMultiples[partial] / renderSampleRate
             if phases[partial] > 1 { phases[partial] -= floor(phases[partial]) }
         }
     }
@@ -347,7 +393,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                 type: type,
                 localTime: time - plan.attacks[index],
                 frequency: smoothedFrequency,
-                sampleRate: sampleRate,
+                sampleRate: renderSampleRate,
                 seed: seed
             )
         }
@@ -355,7 +401,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     }
 
     private var filterCoefficient: Float {
-        VoiceSynthesis.onePoleCoefficient(cutoff: spec.cutoff, sampleRate: sampleRate)
+        VoiceSynthesis.onePoleCoefficient(cutoff: spec.cutoff, sampleRate: renderSampleRate)
     }
 
     /// Línea circular con dos tomas. El retardo se desliza con el parámetro, así
@@ -366,7 +412,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
         defer { delayWriteIndex = (delayWriteIndex + 1) % delayCapacity }
 
         guard smoothedDelay > 0.001 else { return dry }
-        let offset = min(Int((0.07 + Double(smoothedDelay) * 0.48) * sampleRate), delayCapacity / 2 - 1)
+        let offset = min(Int((0.07 + Double(smoothedDelay) * 0.48) * renderSampleRate), delayCapacity / 2 - 1)
         let first = delayLine[(delayWriteIndex - offset + delayCapacity * 2) % delayCapacity]
         let second = delayLine[(delayWriteIndex - offset * 2 + delayCapacity * 2) % delayCapacity]
         return dry + first * smoothedDelay * 0.42 + second * smoothedDelay * 0.18
@@ -387,6 +433,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                 && stamp.mHostTime != 0
                 && abs(hostSeconds - now) < 1.0
             resolvedClock = isValid ? .hostTimestamp : .internalCounter
+            clockValue.store(resolvedClock == .hostTimestamp ? 1 : 2, ordering: .releasing)
             if resolvedClock == .internalCounter {
                 anchorSeconds = now
                 renderedFrames = 0
@@ -399,7 +446,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             calibrateSampleRate(blockStart: start, frames: frames)
             return start
         case .internalCounter, .undecided:
-            let estimate = anchorSeconds + renderedFrames / sampleRate
+            let estimate = anchorSeconds + renderedFrames / renderSampleRate
             // Si la tasa real no es la asumida, este reloj se separaría del
             // mundo sin remedio. Un cuarto de segundo de desvío ya es mucho más
             // de lo que explica el adelanto normal del buffer: reanclamos.
@@ -432,7 +479,8 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
         let standard = [44_100.0, 48_000.0, 88_200.0, 96_000.0]
             .min { abs($0 - average) < abs($1 - average) } ?? 48_000
         if abs(standard - average) / average < 0.05 {
-            sampleRate = standard
+            renderSampleRate = standard
+            sampleRateBits.store(standard.bitPattern, ordering: .releasing)
         }
     }
 

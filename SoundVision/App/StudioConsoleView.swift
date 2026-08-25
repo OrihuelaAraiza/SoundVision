@@ -106,10 +106,15 @@ struct StudioConsoleView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(state.graphTransport.isPlaying ? .pink : .cyan)
-            .disabled(state.connections.isEmpty)
+            .disabled(state.playEntryNodeID == nil)
 
-            if state.connections.isEmpty {
-                Label("Añade un sonido para poder reproducir", systemImage: "info.circle")
+            if state.playEntryNodeID == nil {
+                Label(
+                    state.nodes.isEmpty
+                        ? "Añade el primer sonido para poder reproducir"
+                        : "Play necesita una única entrada antes de reproducir",
+                    systemImage: "info.circle"
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -203,7 +208,31 @@ struct StudioConsoleView: View {
                 .tracking(1.5)
                 .foregroundStyle(.secondary)
 
-            originPicker
+            if let entry = state.playEntryNode {
+                Label(
+                    "Play inicia únicamente \(entry.name). Los demás sonidos se unen arrastrando sus conectores.",
+                    systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label(
+                    "El primer sonido será la única entrada desde Play.",
+                    systemImage: "play.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.cyan)
+            }
+
+            if state.nodes.count >= AudioEngineManager.maximumVoices {
+                Label(
+                    "Límite de \(AudioEngineManager.maximumVoices) organismos alcanzado para conservar audio estable.",
+                    systemImage: "speaker.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 ForEach(SoundNodeType.allCases, id: \.self) { type in
                     let style = NodeVisualStyle.style(for: type)
@@ -222,38 +251,10 @@ struct StudioConsoleView: View {
                         .frame(minHeight: 38)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(state.nodes.count >= AudioEngineManager.maximumVoices)
                 }
             }
         }
-    }
-
-    /// Antes todo lo nuevo colgaba de Play, así que la composición solo podía
-    /// crecer en abanico: ocho organismos disparando a la vez desde el mismo
-    /// instante. Encadenar es lo que convierte el grafo en una frase, y para eso
-    /// hay que poder decir de dónde nace lo siguiente.
-    private var originPicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker(
-                selection: Binding(
-                    get: { state.connectionOriginID },
-                    set: { state.setConnectionOrigin($0) }
-                )
-            ) {
-                Text("Play · el núcleo").tag(UUID?.none)
-                ForEach(state.nodes) { node in
-                    Text(node.name).tag(UUID?.some(node.id))
-                }
-            } label: {
-                Label("Nace de", systemImage: "arrow.turn.down.right")
-            }
-            .pickerStyle(.menu)
-
-            Text("El sonido que añadas se conectará desde \(state.connectionOriginName), y pasará a ser el origen del siguiente.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.bottom, 2)
     }
 
     /// Un organismo al que Play no llega es un organismo mudo, y el silencio no
@@ -266,11 +267,21 @@ struct StudioConsoleView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                Button { state.connectToPlay(id: node.id) } label: {
-                    Label("Conectar con Play", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                if state.playEntryNodeID == nil {
+                    Button { state.connectToPlay(id: node.id) } label: {
+                        Label("Convertir en entrada de Play", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                } else {
+                    Label(
+                        "Play ya tiene su única entrada. Arrastra el conector de un organismo alcanzable hasta este.",
+                        systemImage: "arrow.triangle.branch"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.bordered)
-                .tint(.orange)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
@@ -318,6 +329,7 @@ struct StudioConsoleView: View {
                 .tint(.cyan)
 
                 reachabilityWarning(for: node)
+                connectionControls(for: node)
 
                 positionControls(for: node)
 
@@ -385,6 +397,90 @@ struct StudioConsoleView: View {
             }
             .buttonStyle(.bordered)
         }
+    }
+
+    /// Alternativa precisa al gesto espacial. La persona sigue decidiendo cada
+    /// enlace, pero no depende de la puntería de manos para construir o corregir
+    /// una ruta compleja.
+    private func connectionControls(for source: SoundNode) -> some View {
+        let availableTargets = state.nodes.filter { candidate in
+            candidate.id != source.id
+                && !state.connections.contains {
+                    $0.sourceNodeID == source.id && $0.destinationNodeID == candidate.id
+                }
+        }
+        let outgoing = state.connections.filter { $0.sourceNodeID == source.id }
+        let playConnection = state.connections.first {
+            $0.sourceNodeID == nil && $0.destinationNodeID == source.id
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("CONEXIONES DESDE ESTE ORGANISMO")
+                .font(.caption2.weight(.bold))
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+
+            if let playConnection {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill").foregroundStyle(.cyan)
+                    Text("Entrada única: Play → \(source.name)")
+                        .font(.caption)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Button(role: .destructive) {
+                        state.removeConnection(id: playConnection.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Quitar entrada de Play")
+                }
+            }
+
+            Menu {
+                ForEach(availableTargets) { target in
+                    Button {
+                        _ = state.connect(sourceID: source.id, destinationID: target.id)
+                    } label: {
+                        Label(target.name, systemImage: SoundNodeType.icon(for: target.type))
+                    }
+                }
+            } label: {
+                Label("Conectar hacia…", systemImage: "arrow.turn.down.right")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(availableTargets.isEmpty)
+
+            if outgoing.isEmpty {
+                Text("Sin salidas. Este organismo será el final de su rama.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(outgoing) { connection in
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.right")
+                            .foregroundStyle(.cyan)
+                        Text(state.node(id: connection.destinationNodeID)?.name ?? "Destino eliminado")
+                            .font(.caption)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text(String(format: "%.2f beats", connection.durationBeats))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            state.removeConnection(id: connection.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cortar conexión")
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(.cyan.opacity(0.08), in: .rect(cornerRadius: 12))
     }
 
     /// Colocación exacta desde la ventana. El arrastre con la mano sigue siendo

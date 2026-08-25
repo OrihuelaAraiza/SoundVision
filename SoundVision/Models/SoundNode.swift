@@ -243,16 +243,48 @@ extension Composition {
         let validIDs = Set(uniqueNodes.map(\.id))
 
         var seenConnections = Set<UUID>()
-        let cleanConnections = connections.filter { connection in
-            guard validIDs.contains(connection.destinationNodeID) else { return false }
-            if let source = connection.sourceNodeID, !validIDs.contains(source) { return false }
-            return seenConnections.insert(connection.id).inserted
+        var seenEdges = Set<String>()
+        var hasPlayEntry = false
+        var cleanConnections = connections.compactMap { connection -> SoundConnection? in
+            guard validIDs.contains(connection.destinationNodeID),
+                  seenConnections.insert(connection.id).inserted
+            else { return nil }
+
+            if let source = connection.sourceNodeID {
+                guard validIDs.contains(source), source != connection.destinationNodeID else { return nil }
+            } else {
+                // PLAY es una entrada, no un distribuidor. Una composición de una
+                // versión anterior podía traer varias raíces; conservar la primera
+                // mantiene un punto de inicio determinista y deja las demás ramas
+                // visibles para que la persona decida cómo reconectarlas.
+                guard !hasPlayEntry else { return nil }
+                hasPlayEntry = true
+            }
+
+            let edgeKey = "\(connection.sourceNodeID?.uuidString ?? "play")->\(connection.destinationNodeID.uuidString)"
+            guard seenEdges.insert(edgeKey).inserted else { return nil }
+
+            var copy = connection
+            copy.durationBeats = connection.durationBeats.isFinite
+                ? Swift.max(0.0625, Swift.min(connection.durationBeats, 32))
+                : 1
+            return copy
+        }
+
+        // Un grafo con organismos pero sin entrada nunca puede sonar. Para datos
+        // antiguos o escritos a medias se rescata únicamente el primer organismo;
+        // jamás se vuelve a crear el abanico PLAY -> todos.
+        if !uniqueNodes.isEmpty, !hasPlayEntry {
+            cleanConnections.insert(
+                SoundConnection(sourceNodeID: nil, destinationNodeID: uniqueNodes[0].id),
+                at: 0
+            )
         }
 
         return Composition(
             title: title,
             bpm: bpm.isFinite ? Swift.max(40, Swift.min(bpm, 240)) : 120,
-            steps: steps,
+            steps: Swift.max(1, Swift.min(steps, 128)),
             nodes: uniqueNodes,
             connections: cleanConnections
         )

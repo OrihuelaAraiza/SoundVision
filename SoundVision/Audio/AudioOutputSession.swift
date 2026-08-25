@@ -14,10 +14,11 @@ enum AudioOutputSession {
     /// Solo tiene valor si el sistema rechazó algo. La consola lo enseña.
     private(set) static var problem: String?
     private static var isActive = false
+    private static var isConfigured = false
 
     @discardableResult
-    static func activate() -> Bool {
-        guard !isActive else { return true }
+    static func activate(force: Bool = false) -> Bool {
+        guard force || !isActive else { return true }
         let session = AVAudioSession.sharedInstance()
         do {
             // `.playback` con modo `.default` es la configuración canónica para
@@ -28,7 +29,10 @@ enum AudioOutputSession {
             // la salida y no vale la pena arriesgar la espacialización por
             // educación. La sesión se activa al entrar al estudio, no al
             // arrancar la app, así que nada se interrumpe antes de tiempo.
-            try session.setCategory(.playback, mode: .default)
+            if !isConfigured {
+                try session.setCategory(.playback, mode: .default)
+                isConfigured = true
+            }
             try session.setActive(true)
             isActive = true
             problem = nil
@@ -36,6 +40,25 @@ enum AudioOutputSession {
         } catch {
             problem = "el sistema no concedió la sesión de audio (\(error.localizedDescription))"
             return false
+        }
+    }
+
+    /// Una interrupción, cambio de ruta o reinicio de servicios invalida el
+    /// supuesto de que la sesión sigue activa. La siguiente preparación debe
+    /// solicitarla de nuevo, aunque antes haya funcionado.
+    static func invalidate(configurationToo: Bool = false) {
+        isActive = false
+        if configurationToo { isConfigured = false }
+    }
+
+    static func deactivate() {
+        guard isActive else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            isActive = false
+            problem = nil
+        } catch {
+            problem = "no se pudo liberar la sesión de audio (\(error.localizedDescription))"
         }
     }
 

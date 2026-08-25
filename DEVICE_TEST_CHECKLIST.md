@@ -34,11 +34,13 @@
 4. En la demo pulsa **Nueva pista** y confirma el diálogo: **el diálogo debe
    aparecer**. Después todos los nodos de prueba deben desaparecer.
 5. En **Añadir sonido** toca `Kick` y confirma que aparece un nodo seleccionado
-   y conectado a Play. Toca ahora `Bass`: debe colgar **del Kick**, no de Play, y
-   el selector **Nace de** debe pasar a decir `Bass`. Cambia el selector a
-   `Play` y añade un tercero: ese sí debe salir del núcleo.
-6. Tira del núcleo Play dentro del espacio y suelta: debe extraerse un organismo
-   nuevo en el punto donde soltaste.
+   y conectado a Play. Toca ahora `Bass`: debe aparecer **sin conexión**. En el
+   inspector de `Kick`, usa **Conectar hacia… → Bass** (o arrastra su punto
+   luminoso hasta Bass) y confirma la línea. Añade un tercero: también debe
+   aparecer libre y Play debe conservar **una sola salida**.
+6. Con la entrada de Play ya ocupada, tira del núcleo dentro del espacio y
+   suelta: **no** debe crear otro organismo ni otra salida; debe explicar que el
+   resto de la composición se conecta entre organismos.
 7. Selecciona un nodo y pulsa la papelera: el diálogo de borrado debe aparecer y
    confirmar debe eliminar nodo y conexiones.
 8. Alterna diez veces entre **Demo** y **Nueva pista**. Cada cambio debe
@@ -135,14 +137,16 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    con la otra mano: debe responder a la primera.
 3c. Si aun así no consigues moverlo con la mano, usa los sliders de **Posición**
    del inspector y anótalo: significa que el arrastre 3D sigue fallando.
-3g. **Encadenar.** Con el selector **Nace de** en un organismo concreto, añade
-   tres sonidos seguidos: deben formar una **cadena** —cada uno colgando del
-   anterior— y no un abanico desde Play. Reproduce y confirma que entran uno tras
-   otro, no todos a la vez.
+3g. **Encadenar por decisión explícita.** Añade tres sonidos: solo el primero
+   debe salir de Play y los otros dos deben nacer libres. Conecta primero →
+   segundo → tercero, mediante los hilos o **Conectar hacia…**. Reproduce y
+   confirma que entran uno tras otro, no todos a la vez.
 3h. **Organismo incomunicado.** Corta la conexión que une una rama con Play y
    selecciona un organismo de esa rama: el inspector debe avisar en naranja de
-   que Play no llega hasta ahí. Pulsa **Conectar con Play** y confirma que el
-   aviso desaparece y que vuelve a sonar al reproducir.
+   que Play no llega hasta ahí. Si Play conserva su entrada, reconecta la rama
+   desde un organismo alcanzable; no debe ofrecer una segunda salida de Play.
+   Si cortaste la propia entrada y Play quedó libre, **Convertir en entrada de
+   Play** debe rescatar exactamente un organismo.
 4. **Cortar.** Haz pinch sobre una conexión: debe desaparecer al instante.
    Pulsa **Deshacer** en la consola y confirma que vuelve.
 5. Deshaz varias veces seguidas (corte, nodo añadido, demo cargada). Cada paso

@@ -86,7 +86,7 @@ final class SoundVisionTests: XCTestCase {
         state.loadSpatialTestScene()
 
         XCTAssertEqual(state.nodes.count, 5)
-        XCTAssertEqual(state.connections.count, 7)
+        XCTAssertEqual(state.connections.count, 6)
         XCTAssertTrue(state.isSpatialTestScene)
         XCTAssertNotNil(state.selectedNode)
         XCTAssertTrue(state.nodes.contains { $0.positionZ > 1.8 }, "La demo debe incluir una fuente detrás del usuario")
@@ -96,7 +96,7 @@ final class SoundVisionTests: XCTestCase {
             connections: state.connections,
             loopPasses: state.graphTransport.loopPasses
         )
-        XCTAssertEqual(timeline.filter { $0.beat == 0 }.count, 2)
+        XCTAssertEqual(timeline.filter { $0.beat == 0 }.count, 1)
         XCTAssertLessThan(timeline.count, 20)
     }
 
@@ -176,9 +176,7 @@ final class SoundVisionTests: XCTestCase {
     func testCuttingAConnectionIsUndoable() {
         let state = CompositionState()
         let source = state.createNode(of: .kick)
-        // Desde Play a propósito: así la conexión que se corta es la que crea
-        // esta prueba y no la que el encadenado automático ya habría puesto.
-        let destination = state.createNode(of: .bass, from: .play)
+        let destination = state.createNode(of: .bass)
         XCTAssertTrue(state.connect(sourceID: source, destinationID: destination))
 
         let connectionCount = state.connections.count

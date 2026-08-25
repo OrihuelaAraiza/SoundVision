@@ -1,3 +1,4 @@
+import AVFAudio
 import QuartzCore
 import RealityKit
 import Spatial
@@ -28,6 +29,7 @@ struct SoundSculptureView: View {
             // van se detienen antes de que sus entidades desaparezcan, y las
             // nuevas se enganchan solo después de que la escena las haya creado.
             let sustainBeats = state.sustainBeatsByNode()
+            audioEngine.updateTempo(bpm: state.sequencer.bpm)
             audioEngine.releaseVoices(keeping: Set(state.nodes.map(\.id)))
             reconcileNodes(in: root)
             audioEngine.attachVoices(for: state.nodes, sustainBeats: sustainBeats) { id in
@@ -73,6 +75,17 @@ struct SoundSculptureView: View {
                 if summary != state.audioDiagnostics { state.audioDiagnostics = summary }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) {
+            handleAudioInterruption($0)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) {
+            handleAudioRouteChange($0)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.mediaServicesWereResetNotification)) { _ in
+            state.stopPlayback()
+            audioEngine.recoverFromAudioEnvironmentChange(resetConfiguration: true)
+            state.statusMessage = "El sistema de audio se reinició. Las voces se reconstruyeron; pulsa Reproducir."
+        }
         .onDisappear {
             // El espacio también puede cerrarse desde el sistema (corona
             // digital). Sin esto la ventana seguía mostrando la consola de un
@@ -86,6 +99,41 @@ struct SoundSculptureView: View {
     }
 
     // MARK: - Gestos
+
+    private func handleAudioInterruption(_ notification: Notification) {
+        guard let raw = (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? NSNumber)?.uintValue,
+              let type = AVAudioSession.InterruptionType(rawValue: raw)
+        else { return }
+
+        switch type {
+        case .began:
+            state.stopPlayback()
+            audioEngine.suspendForAudioInterruption()
+            state.statusMessage = "Audio interrumpido por el sistema. La composición quedó detenida de forma segura."
+        case .ended:
+            audioEngine.recoverFromAudioEnvironmentChange()
+            state.statusMessage = "Salida de audio recuperada. Pulsa Reproducir para iniciar desde Play."
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleAudioRouteChange(_ notification: Notification) {
+        guard let raw = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+        else { return }
+
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .noSuitableRouteForCategory:
+            state.stopPlayback()
+            audioEngine.recoverFromAudioEnvironmentChange()
+            state.statusMessage = "Cambió la salida de audio. Las voces se reconectaron; pulsa Reproducir."
+        default:
+            // Activar nuestra propia categoría también genera una notificación;
+            // ignorarla evita un ciclo de reactivación sin fin.
+            break
+        }
+    }
 
     private var tapGesture: some Gesture {
         TapGesture()
@@ -116,7 +164,12 @@ struct SoundSculptureView: View {
                       let node = state.node(id: id)
                 else { return }
 
-                let current = value.convert(value.location3D, from: .local, to: root)
+                // El seguimiento puede entregar una coordenada no finita durante
+                // un frame al perder una mano. Nunca debe llegar a una transformada
+                // de RealityKit, tampoco mientras solo dibujamos el hilo temporal.
+                let current = state.clampedPosition(
+                    value.convert(value.location3D, from: .local, to: root)
+                )
 
                 // Tirar del conector traza un hilo; tirar del cuerpo mueve el
                 // organismo. Un mismo gesto, dos intenciones, sin ningún modo.
@@ -198,9 +251,11 @@ struct SoundSculptureView: View {
                     // organismos que nadie había pedido.
                     let drop = value.convert(value.location3D, from: .local, to: root)
                     if simd_distance(drop, CompositionState.playNodePosition) > 0.45 {
-                        // Tirar del núcleo es decir "esto nace de Play",
-                        // independientemente del origen elegido en la consola.
-                        state.createNextNode(at: drop, from: .play)
+                        if state.playEntryNodeID == nil {
+                            state.createNextNode(at: drop)
+                        } else {
+                            state.statusMessage = "Play ya tiene su única salida. Añade otro sonido y conéctalo entre organismos."
+                        }
                     }
                 }
             }

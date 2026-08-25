@@ -6,7 +6,7 @@ una composición musical en un grafo 3D interactivo.
 ## Prototipo actual
 
 - Ventana SwiftUI y `ImmersiveSpace` mixto.
-- Núcleo Play desde el que se extraen y conectan organismos sonoros.
+- Núcleo Play con una única salida hacia el primer organismo sonoro.
 - Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
 - Conexiones dirigidas libres con bifurcaciones simultáneas y loops acotados.
 - Voces persistentes: cada organismo tiene su generador de audio vivo desde que
@@ -59,8 +59,8 @@ fuentes distribuidas alrededor del usuario y muestra una guía paso a paso en la
 consola.
 
 Para componer desde cero, pulsa **Nueva pista** y usa **Añadir sonido** en la
-consola. También puedes tirar del núcleo Play dentro del espacio para extraer un
-organismo nuevo en el punto donde sueltes.
+consola. El primero será la única entrada desde Play; los siguientes aparecen
+libres para que decidas cómo conectarlos entre sí.
 
 ## Cómo el espacio se convierte en música
 
@@ -106,12 +106,11 @@ ventana y la reproducción entera podía transcurrir en silencio mientras las
 animaciones seguían su curso, sin ningún error que lo explicara.
 
 La agenda cruza al hilo de audio por [VoiceSchedule.swift](SoundVision/Audio/VoiceSchedule.swift):
-dos losas fijas y un estado atómico que dice cuál está publicada. El hilo
-principal escribe siempre en la que no se está leyendo, de modo que una lectura
-en vuelo nunca ve una agenda a medio escribir, y nada de esto reserva memoria ni
-toma un lock. Detener no vacía la agenda: marca un instante de corte y la cola se
-desvanece en 12 ms, porque truncar la onda a mitad de ciclo se oye como un
-chasquido.
+cuatro losas fijas y un estado atómico que dice cuál está publicada. El hilo
+principal rota la losa antes de publicar, de modo que una lectura en vuelo no ve
+una agenda a medio escribir, y nada de esto reserva memoria ni toma un lock.
+Detener no vacía la agenda: marca un instante de corte y la cola se desvanece en
+12 ms, porque truncar la onda a mitad de ciclo se oye como un chasquido.
 
 La app también configura y activa explícitamente su `AVAudioSession`. No lo
 hacía, y la categoría por defecto es otra de las explicaciones clásicas de
@@ -161,28 +160,25 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 | Pinch sobre una conexión | La corta. |
 | Girar con dos manos | Reverb, delay y distorsión. |
 | Pinch sobre el núcleo Play | Reproduce o detiene. |
-| Tirar del núcleo Play | Extrae un organismo nuevo donde sueltes. |
+| Tirar del núcleo Play | Extrae el primer organismo solo si Play aún no tiene entrada. |
 
-Conectar no tiene modo ni botón: se tira de un hilo y se suelta donde quieras.
-Mientras el hilo está en el aire, el destino candidato se ilumina, así que sabes
-dónde va a engancharse antes de soltar.
+Conectar no requiere entrar en un modo: se tira de un hilo y se suelta donde
+quieras. Mientras está en el aire, el destino candidato se ilumina. El inspector
+también ofrece **Conectar hacia…** como alternativa precisa cuando la puntería
+espacial no resulte cómoda.
 
 ### De dónde nace cada sonido
 
-Todo lo que se añadía desde la consola colgaba del núcleo Play sin excepción, de
-modo que la composición solo podía crecer en abanico: ocho organismos disparando
-a la vez desde el mismo instante, y ninguna forma de escribir una frase.
-
-La pestaña **Sonidos** tiene ahora un selector **Nace de**. El sonido que añadas
-se conecta desde ahí, y pasa a ser el origen del siguiente: añadir cuatro
-seguidos escribe una cadena, no un abanico. Seleccionar un organismo en el
-espacio también lo convierte en el origen, y Play sigue estando en la lista para
-empezar una rama nueva. Tirar del núcleo mantiene su significado literal: lo que
-sale de ahí nace de Play, diga lo que diga el selector.
+Play es una entrada, no un distribuidor: solo puede iniciar un organismo. El
+primero que añadas se conecta automáticamente; todos los siguientes aparecen
+libres. La persona construye la frase enlazándolos con el hilo espacial o con
+**Conectar hacia…** en el inspector. Seleccionar un organismo nunca crea ni
+cambia conexiones por su cuenta.
 
 Un organismo al que Play no llega por ningún camino no suena. El inspector lo
-avisa en naranja y ofrece **Conectar con Play** en el mismo sitio, porque el
-silencio no explica por sí solo por qué falta un instrumento.
+avisa en naranja y pide unirlo desde una rama alcanzable. Solo cuando Play quedó
+sin entrada —por ejemplo, tras cortar esa conexión— permite convertir un
+organismo en la nueva entrada; nunca crea un segundo inicio.
 
 La consola se organiza en tres pestañas —**Reproducir**, **Sonidos** y
 **Nodo**— para que cada pantalla quepa entera. En una sola columna con scroll,

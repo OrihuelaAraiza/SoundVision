@@ -12,13 +12,14 @@ import Synchronization
 /// voces viven mientras vive su organismo y Play solo publica aquí sus tiempos,
 /// así que entre pulsar y sonar no queda ningún trabajo pesado.
 ///
-/// Dos losas fijas y un estado atómico: el hilo principal escribe siempre en la
-/// losa que *no* está publicada y luego publica índice y número de ataques de
-/// una sola vez. Una lectura en vuelo nunca ve una agenda a medio escribir.
+/// Cuatro losas fijas y un estado atómico: el hilo principal rota la losa y luego
+/// publica índice y número de ataques de una sola vez. La holgura cubre Stop/Play
+/// y cambios rápidos sin reutilizar la memoria que lee el bloque de audio vivo.
 final class VoiceSchedule: @unchecked Sendable {
     /// Techo de ataques por voz y reproducción. El grafo entero está limitado a
     /// 512 eventos, repartidos entre todos los organismos.
-    static let capacity = 128
+    static let capacity = 512
+    private static let slabCount = 4
 
     /// Fotografía coherente de la agenda, tomada una vez por bloque de audio.
     struct Snapshot {
@@ -31,15 +32,15 @@ final class VoiceSchedule: @unchecked Sendable {
     }
 
     private let attacks: UnsafeMutablePointer<Double>
-    /// generación (31 bits) · losa (1 bit) · número de ataques (32 bits).
+    /// generación (46 bits) · losa (2 bits) · número de ataques (16 bits).
     private let published = Atomic<UInt64>(0)
     private let stopBits = Atomic<UInt64>(Double.infinity.bitPattern)
     private var writeSlab = 1
     private var generation: UInt64 = 0
 
     init() {
-        attacks = .allocate(capacity: Self.capacity * 2)
-        attacks.initialize(repeating: 0, count: Self.capacity * 2)
+        attacks = .allocate(capacity: Self.capacity * Self.slabCount)
+        attacks.initialize(repeating: 0, count: Self.capacity * Self.slabCount)
     }
 
     deinit {
@@ -54,12 +55,12 @@ final class VoiceSchedule: @unchecked Sendable {
         for index in 0..<count { base[index] = sorted[index] }
 
         stopBits.store(Double.infinity.bitPattern, ordering: .releasing)
-        generation = (generation &+ 1) & 0x7FFF_FFFF
+        generation = (generation &+ 1) & 0x3FFF_FFFF_FFFF
         published.store(
-            (generation &<< 33) | (UInt64(writeSlab) &<< 32) | UInt64(count),
+            (generation &<< 18) | (UInt64(writeSlab) &<< 16) | UInt64(count),
             ordering: .releasing
         )
-        writeSlab = 1 - writeSlab
+        writeSlab = (writeSlab + 1) % Self.slabCount
     }
 
     /// Corta la reproducción sin vaciar la agenda: lo que ya está sonando
@@ -77,11 +78,11 @@ final class VoiceSchedule: @unchecked Sendable {
     @inline(__always)
     func snapshot() -> Snapshot {
         let state = published.load(ordering: .acquiring)
-        let slab = Int((state &>> 32) & 1)
+        let slab = Int((state &>> 16) & 0b11)
         return Snapshot(
             attacks: UnsafePointer(attacks + slab * Self.capacity),
-            count: Int(state & 0xFFFF_FFFF),
-            generation: state &>> 33,
+            count: Int(state & 0xFFFF),
+            generation: state &>> 18,
             stopTime: Double(bitPattern: stopBits.load(ordering: .acquiring))
         )
     }
