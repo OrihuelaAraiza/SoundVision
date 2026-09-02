@@ -14,16 +14,14 @@ final class GraphTransport: ObservableObject {
     @Published var loopPasses = 2
 
     private var visualTask: Task<Void, Never>?
-    private var completion: (() -> Void)?
 
     @discardableResult
     func start(
         nodes: [SoundNode],
         connections: [SoundConnection],
         bpm: Double,
-        onSchedule: ([GraphPlaybackEvent], Double) -> TimeInterval?,
-        onVisualTrigger: @escaping (SoundNode) -> Void,
-        onCompletion: @escaping () -> Void = {}
+        onSchedule: ([GraphPlaybackEvent], Double, Double) -> TimeInterval?,
+        onVisualTrigger: @escaping (SoundNode) -> Void
     ) -> Bool {
         guard !isPlaying else { return false }
         let timeline = Self.makeSchedule(
@@ -34,43 +32,41 @@ final class GraphTransport: ObservableObject {
         guard !timeline.isEmpty else { return false }
 
         let secondsPerBeat = 60 / max(bpm, 1)
+        let loopDurationBeats = Self.loopDurationBeats(for: timeline)
         // Tolerante a identificadores repetidos: `uniqueKeysWithValues` aborta
         // el proceso en el acto, y una composición cargada con dos nodos del
         // mismo id convertía Play en un cierre inesperado.
         let nodesByID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        guard let visualLeadIn = onSchedule(timeline, secondsPerBeat) else { return false }
+        guard let visualLeadIn = onSchedule(timeline, secondsPerBeat, loopDurationBeats) else { return false }
         isPlaying = true
-        completion = onCompletion
 
         // Una sola tarea recorre la línea de tiempo en orden. Antes se creaba
         // una por evento —hasta 512 tareas dormidas a la vez— y todas competían
         // por el hilo principal justo mientras sonaba la música.
         let ordered = timeline.sorted { $0.beat < $1.beat }
-        let endBeat = ordered.last?.beat ?? 0
         visualTask = Task { @MainActor [weak self] in
             let clock = ContinuousClock()
             let origin = clock.now
+            var loopOffsetBeats = 0.0
 
-            for event in ordered {
-                guard let node = nodesByID[event.nodeID] else { continue }
-                // Cada espera se mide contra el origen, no contra la anterior:
-                // así el destello número cien no acumula el retraso de los
-                // noventa y nueve anteriores.
-                let target = origin.advanced(by: .seconds(visualLeadIn + event.beat * secondsPerBeat))
-                try? await clock.sleep(until: target)
-                guard let self, self.isPlaying, !Task.isCancelled else { return }
-                if node.isActive { onVisualTrigger(node) }
+            // El grafo es un patrón, no una reproducción de una sola toma. La
+            // agenda de audio repite el mismo patrón con su reloj sample-accurate
+            // y esta tarea hace lo propio con los destellos hasta que llegue Stop.
+            while let self, self.isPlaying, !Task.isCancelled {
+                for event in ordered {
+                    guard let node = nodesByID[event.nodeID] else { continue }
+                    // Cada espera se mide contra el origen, no contra la anterior:
+                    // así ni las ramas simultáneas ni las vueltas largas acumulan
+                    // el retraso de los eventos anteriores.
+                    let target = origin.advanced(by: .seconds(
+                        visualLeadIn + (loopOffsetBeats + event.beat) * secondsPerBeat
+                    ))
+                    try? await clock.sleep(until: target)
+                    guard self.isPlaying, !Task.isCancelled else { return }
+                    if node.isActive { onVisualTrigger(node) }
+                }
+                loopOffsetBeats += loopDurationBeats
             }
-
-            // La última voz puede ser un Pad sostenido. Cerrar la sesión con una
-            // cola fija de 1.2 s truncaba notas perfectamente válidas y hacía
-            // parecer que algunos organismos no se reproducían completos.
-            let end = origin.advanced(by: .seconds(
-                visualLeadIn + endBeat * secondsPerBeat + VoiceSynthesis.maximumDuration + 0.15
-            ))
-            try? await clock.sleep(until: end)
-            guard let self, !Task.isCancelled else { return }
-            self.finishPlayback()
         }
         return true
     }
@@ -79,7 +75,6 @@ final class GraphTransport: ObservableObject {
         visualTask?.cancel()
         visualTask = nil
         isPlaying = false
-        completion = nil
     }
 
     /// Cada salida de un nodo crea una rama con el mismo tiempo de partida.
@@ -151,12 +146,11 @@ final class GraphTransport: ObservableObject {
         }
     }
 
-    private func finishPlayback() {
-        visualTask = nil
-        isPlaying = false
-        let callback = completion
-        completion = nil
-        callback?()
+    /// Una vuelta termina un beat después del último ataque. Así un patrón de
+    /// un solo organismo también tiene pulso y el último sonido no coincide con
+    /// el primero de la siguiente vuelta por accidente.
+    nonisolated static func loopDurationBeats(for timeline: [GraphPlaybackEvent]) -> Double {
+        max(1, (timeline.map(\.beat).max() ?? 0) + 1)
     }
 
     deinit {

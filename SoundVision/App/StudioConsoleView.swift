@@ -134,7 +134,7 @@ struct StudioConsoleView: View {
             }
 
             Stepper(
-                "Loops \(state.graphTransport.loopPasses)×",
+                "Vueltas de ciclos internos \(state.graphTransport.loopPasses)×",
                 value: Binding(
                     get: { state.graphTransport.loopPasses },
                     set: { state.graphTransport.loopPasses = $0 }

@@ -133,6 +133,28 @@ final class SpatialVoiceRendererTests: XCTestCase {
         )
     }
 
+    func testPublishedPatternRepeatsUntilItIsStopped() {
+        let renderer = SpatialVoiceRenderer(
+            node: SoundNode(name: "Kick", type: .kick, positionX: 0, positionY: 1.25, positionZ: 0)
+        )
+        let first = mach_absolute_time()
+        let firstSeconds = AVAudioTime.seconds(forHostTime: first)
+        let interval = 0.5
+        renderer.schedule.publish(
+            [firstSeconds],
+            loopStart: firstSeconds,
+            repeatingEvery: interval
+        )
+
+        XCTAssertTrue(render(renderer, hostTime: first, hostTimeValid: true).contains { $0 != 0 })
+
+        let second = first + AVAudioTime.hostTime(forSeconds: interval)
+        XCTAssertTrue(
+            render(renderer, hostTime: second, hostTimeValid: true).contains { $0 != 0 },
+            "La misma voz debe atacar otra vez en la siguiente vuelta sin republicar la agenda"
+        )
+    }
+
     /// Detener no vacía la agenda: deja que la cola se apague en unos
     /// milisegundos. Cortar la onda a mitad de ciclo se oye como un chasquido.
     func testStoppingFadesTheTailAndThenGoesSilent() {
@@ -228,6 +250,16 @@ final class SpatialVoiceRendererTests: XCTestCase {
         // datos rotos a mitad de bloque.
         XCTAssertEqual(first.attacks[0], 1)
         XCTAssertNotEqual(UnsafeRawPointer(first.attacks), UnsafeRawPointer(second.attacks))
+    }
+
+    func testSchedulePublishesLoopMetadataWithTheSameSlab() {
+        let schedule = VoiceSchedule()
+        schedule.publish([11, 12], loopStart: 10, repeatingEvery: 4)
+
+        let plan = schedule.snapshot()
+
+        XCTAssertEqual(plan.loopStart, 10)
+        XCTAssertEqual(plan.repeatInterval, 4)
     }
 
     /// Los ataques llegan en el orden en que los produce el grafo, no ordenados.

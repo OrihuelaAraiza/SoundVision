@@ -147,6 +147,9 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    desde un organismo alcanzable; no debe ofrecer una segunda salida de Play.
    Si cortaste la propia entrada y Play quedó libre, **Convertir en entrada de
    Play** debe rescatar exactamente un organismo.
+3i. **Bifurcación completa.** Conecta primero → segundo y primero → tercero.
+   Pulsa Reproducir: segundo y tercero deben sonar en la misma vuelta; ninguno
+   puede reemplazar ni silenciar al otro.
 4. **Cortar.** Haz pinch sobre una conexión: debe desaparecer al instante.
    Pulsa **Deshacer** en la consola y confirma que vuelve.
 5. Deshaz varias veces seguidas (corte, nodo añadido, demo cargada). Cada paso
@@ -160,9 +163,11 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    duración **no cambian** en el inspector. Desactívalo y confirma que vuelve a
    afinarse al moverlo. Acomoda toda la composición con los candados puestos y
    comprueba que suena exactamente igual que antes de ordenarla.
-8. Reproduce, detén, vuelve a reproducir y cambia tempo/loops cuando esté
-   detenido. **La segunda reproducción debe sonar igual que la primera**, y al
-   detener el corte debe apagarse limpio, sin chasquido.
+8. Reproduce y deja pasar al menos tres vueltas completas: el patrón debe
+   reiniciarse por sí mismo y seguir sonando hasta pulsar **Detener**. Vuelve a
+   reproducir y cambia tempo/vueltas internas cuando esté detenido. **La segunda
+   reproducción debe sonar igual que la primera**, y al detener el corte debe
+   apagarse limpio, sin chasquido.
 9. Selecciona un nodo detenido: debe mostrar pocas partículas. Al escucharlo,
    la emisión debe intensificarse y después desaparecer sin quedar residuos.
 

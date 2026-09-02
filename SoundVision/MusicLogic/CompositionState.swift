@@ -355,27 +355,24 @@ final class CompositionState: ObservableObject {
             nodes: nodes,
             connections: connections,
             bpm: sequencer.bpm,
-            onSchedule: { [weak self] timeline, secondsPerBeat in
+            onSchedule: { [weak self] timeline, secondsPerBeat, loopDurationBeats in
                 guard let self else { return nil }
                 let session = SpatialAudioSession(
                     nodes: Array(nodesByID.values),
                     events: timeline,
                     sustainBeats: self.sustainBeatsByNode(),
-                    secondsPerBeat: secondsPerBeat
+                    secondsPerBeat: secondsPerBeat,
+                    loopDurationBeats: loopDurationBeats
                 )
                 self.spatialAudioSession = session
                 return session.leadInSeconds
             },
             onVisualTrigger: { [weak self] node in
                 self?.triggerVisualPulse(for: node.id)
-            },
-            onCompletion: { [weak self] in
-                self?.spatialAudioSession = nil
-                self?.statusMessage = "Reproducción completa."
             }
         )
         if didStart {
-            statusMessage = "Reproduciendo desde \(playEntryNode?.name ?? "la entrada")."
+            statusMessage = "Loop activo desde \(playEntryNode?.name ?? "la entrada"). Pulsa Detener para terminar."
         } else {
             spatialAudioSession = nil
             statusMessage = "No se pudo construir una ruta reproducible desde Play."

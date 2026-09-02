@@ -10,6 +10,9 @@ struct SpatialAudioSession: Identifiable, Sendable {
     /// distancia horizontal traducida a tiempo: lejos sostiene, cerca es staccato.
     let sustainBeats: [UUID: Double]
     let secondsPerBeat: Double
+    /// Duración del patrón que vuelve a empezar hasta recibir Stop. `nil` deja
+    /// una sesión de una sola toma, como el preview de un organismo.
+    let loopDurationBeats: Double?
     let startHostTime: UInt64
     let leadInSeconds: TimeInterval
 
@@ -19,6 +22,7 @@ struct SpatialAudioSession: Identifiable, Sendable {
         events: [GraphPlaybackEvent],
         sustainBeats: [UUID: Double] = [:],
         secondsPerBeat: Double,
+        loopDurationBeats: Double? = nil,
         // Margen para que SwiftUI propague la sesión y las voces reciban su
         // agenda antes del primer ataque. Ya no incluye el enganche del audio:
         // las voces están vivas desde que existe el organismo, así que aquí solo
@@ -30,8 +34,28 @@ struct SpatialAudioSession: Identifiable, Sendable {
         self.events = events
         self.sustainBeats = sustainBeats
         self.secondsPerBeat = secondsPerBeat
+        self.loopDurationBeats = loopDurationBeats
         self.leadInSeconds = leadInSeconds
         startHostTime = mach_absolute_time() + AVAudioTime.hostTime(forSeconds: leadInSeconds)
+    }
+
+    var loopDurationSeconds: TimeInterval? {
+        guard let loopDurationBeats,
+              loopDurationBeats.isFinite,
+              loopDurationBeats > 0,
+              secondsPerBeat.isFinite,
+              secondsPerBeat > 0
+        else { return nil }
+        return loopDurationBeats * secondsPerBeat
+    }
+
+    /// Conserva cada bifurcación como una agenda independiente. Agrupar aquí,
+    /// antes de tocar las voces de RealityKit, evita que una salida simultánea
+    /// pueda reemplazar a otra al publicar el patrón.
+    func attackTimesByNode(startSeconds: TimeInterval) -> [UUID: [TimeInterval]] {
+        Dictionary(grouping: events, by: \.nodeID).mapValues { events in
+            events.map { startSeconds + $0.beat * secondsPerBeat }
+        }
     }
 }
 
@@ -238,18 +262,22 @@ final class AudioEngineManager: ObservableObject {
             start = publishedStartSeconds ?? now + 0.06
         }
         let activeIDs = Set(session.nodes.filter(\.isActive).map(\.id))
-        let eventsByNode = Dictionary(grouping: session.events, by: \.nodeID)
+        let attacksByNode = session.attackTimesByNode(startSeconds: start)
 
         for nodeID in Array(voices.keys) {
             guard var voice = voices[nodeID] else { continue }
             guard isNewSession || voice.publishedSessionID != session.id else { continue }
-            guard activeIDs.contains(nodeID), let events = eventsByNode[nodeID] else {
+            guard activeIDs.contains(nodeID), let attacks = attacksByNode[nodeID] else {
                 voice.renderer.schedule.clear()
                 voice.publishedSessionID = session.id
                 voices[nodeID] = voice
                 continue
             }
-            voice.renderer.schedule.publish(events.map { start + $0.beat * session.secondsPerBeat })
+            voice.renderer.schedule.publish(
+                attacks,
+                loopStart: start,
+                repeatingEvery: session.loopDurationSeconds
+            )
             voice.publishedSessionID = session.id
             voices[nodeID] = voice
         }

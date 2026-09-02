@@ -61,6 +61,41 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertEqual(Set(schedule.dropFirst().map(\.nodeID)), [branchA.id, branchB.id])
     }
 
+    func testSpatialSessionPublishesEveryBranchToItsOwnVoice() {
+        let sourceID = UUID()
+        let branchAID = UUID()
+        let branchBID = UUID()
+        let session = SpatialAudioSession(
+            nodes: [],
+            events: [
+                GraphPlaybackEvent(nodeID: sourceID, beat: 0),
+                GraphPlaybackEvent(nodeID: branchAID, beat: 1.5),
+                GraphPlaybackEvent(nodeID: branchBID, beat: 1.5)
+            ],
+            secondsPerBeat: 0.5,
+            loopDurationBeats: 2.5
+        )
+
+        let attacks = session.attackTimesByNode(startSeconds: 10)
+
+        XCTAssertEqual(Set(attacks.keys), [sourceID, branchAID, branchBID])
+        XCTAssertEqual(attacks[sourceID], [10])
+        XCTAssertEqual(attacks[branchAID], [10.75])
+        XCTAssertEqual(attacks[branchBID], [10.75])
+        XCTAssertEqual(session.loopDurationSeconds, 1.25)
+    }
+
+    func testGraphLoopWaitsOneBeatAfterTheLastAttack() {
+        let nodeID = UUID()
+        let timeline = [
+            GraphPlaybackEvent(nodeID: nodeID, beat: 0),
+            GraphPlaybackEvent(nodeID: nodeID, beat: 2.25)
+        ]
+
+        XCTAssertEqual(GraphTransport.loopDurationBeats(for: timeline), 3.25)
+        XCTAssertEqual(GraphTransport.loopDurationBeats(for: []), 1)
+    }
+
     func testGraphScheduleBoundsIntentionalCycle() {
         let nodeA = SoundNode(name: "A", type: .lead, positionX: 0, positionY: 1.25, positionZ: 0)
         let nodeB = SoundNode(name: "B", type: .fx, positionX: 1, positionY: 1.25, positionZ: 0)

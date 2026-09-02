@@ -8,7 +8,10 @@ una composición musical en un grafo 3D interactivo.
 - Ventana SwiftUI y `ImmersiveSpace` mixto.
 - Núcleo Play con una única salida hacia el primer organismo sonoro.
 - Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
-- Conexiones dirigidas libres con bifurcaciones simultáneas y loops acotados.
+- Conexiones dirigidas libres con bifurcaciones simultáneas: todas las salidas
+  de un organismo conservan su propia voz y suenan en la misma vuelta.
+- Play repite el patrón completo de forma continua y sample-accurate hasta que
+  la persona pulsa Stop; los ciclos internos del grafo permanecen acotados.
 - Voces persistentes: cada organismo tiene su generador de audio vivo desde que
   nace, y reproducir consiste solo en publicarle tiempos de ataque.
 - Scheduling sample-accurate mediante generadores mono, con la tasa real medida

@@ -29,9 +29,15 @@ final class VoiceSchedule: @unchecked Sendable {
         /// Instante a partir del cual no se atacan notas nuevas y lo que suena
         /// se desvanece. `infinity` mientras la reproducción sigue viva.
         let stopTime: Double
+        /// Cero en previews de una sola toma. En Play, las horas de `attacks`
+        /// pertenecen a la primera vuelta y se repiten con este intervalo.
+        let loopStart: Double
+        let repeatInterval: Double
     }
 
     private let attacks: UnsafeMutablePointer<Double>
+    private let loopStarts: UnsafeMutablePointer<Double>
+    private let repeatIntervals: UnsafeMutablePointer<Double>
     /// generación (46 bits) · losa (2 bits) · número de ataques (16 bits).
     private let published = Atomic<UInt64>(0)
     private let stopBits = Atomic<UInt64>(Double.infinity.bitPattern)
@@ -41,18 +47,41 @@ final class VoiceSchedule: @unchecked Sendable {
     init() {
         attacks = .allocate(capacity: Self.capacity * Self.slabCount)
         attacks.initialize(repeating: 0, count: Self.capacity * Self.slabCount)
+        loopStarts = .allocate(capacity: Self.slabCount)
+        loopStarts.initialize(repeating: 0, count: Self.slabCount)
+        repeatIntervals = .allocate(capacity: Self.slabCount)
+        repeatIntervals.initialize(repeating: 0, count: Self.slabCount)
     }
 
     deinit {
         attacks.deallocate()
+        loopStarts.deallocate()
+        repeatIntervals.deallocate()
     }
 
     /// Publica una agenda nueva, en segundos del reloj mach. Solo hilo principal.
-    func publish(_ times: [Double]) {
+    func publish(
+        _ times: [Double],
+        loopStart: Double? = nil,
+        repeatingEvery repeatInterval: Double? = nil
+    ) {
         let sorted = times.sorted()
         let count = min(sorted.count, Self.capacity)
         let base = attacks + writeSlab * Self.capacity
         for index in 0..<count { base[index] = sorted[index] }
+
+        let validLoopStart: Double
+        let validRepeatInterval: Double
+        if let loopStart, loopStart.isFinite,
+           let repeatInterval, repeatInterval.isFinite, repeatInterval > 0 {
+            validLoopStart = loopStart
+            validRepeatInterval = repeatInterval
+        } else {
+            validLoopStart = 0
+            validRepeatInterval = 0
+        }
+        loopStarts[writeSlab] = validLoopStart
+        repeatIntervals[writeSlab] = validRepeatInterval
 
         stopBits.store(Double.infinity.bitPattern, ordering: .releasing)
         generation = (generation &+ 1) & 0x3FFF_FFFF_FFFF
@@ -83,7 +112,9 @@ final class VoiceSchedule: @unchecked Sendable {
             attacks: UnsafePointer(attacks + slab * Self.capacity),
             count: Int(state & 0xFFFF),
             generation: state &>> 18,
-            stopTime: Double(bitPattern: stopBits.load(ordering: .acquiring))
+            stopTime: Double(bitPattern: stopBits.load(ordering: .acquiring)),
+            loopStart: loopStarts[slab],
+            repeatInterval: repeatIntervals[slab]
         )
     }
 }

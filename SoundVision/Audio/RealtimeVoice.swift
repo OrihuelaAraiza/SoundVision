@@ -216,8 +216,8 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
 
             // Ventana de ataques que pueden sonar en este bloque. Nada que haya
             // sido cortado por Detener entra aquí.
-            let lower = lowerBound(for: blockStart - duration, in: plan)
-            let upper = lowerBound(for: min(blockEnd, plan.stopTime), in: plan)
+            let lower = playbackIndex(atOrAfter: blockStart - duration, in: plan)
+            let upper = playbackIndex(atOrAfter: min(blockEnd, plan.stopTime), in: plan)
             let hasNotes = lower < upper && !live.isMuted && blockStart < fadeEnd
             let hasDelayTail = smoothedDelay > 0.001 && silentFrames < delayCapacity
 
@@ -339,15 +339,15 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     @inline(__always)
     private func tonalSample(
         at time: Double,
-        lower: Int,
-        upper: Int,
+        lower: Int64,
+        upper: Int64,
         duration: Double,
         heldSeconds: Double,
         plan: VoiceSchedule.Snapshot
     ) -> Float {
         var envelopeSum: Float = 0
         for index in lower..<upper {
-            let local = time - plan.attacks[index]
+            let local = time - attackTime(at: index, in: plan)
             guard local >= 0, local < duration else { continue }
             envelopeSum += VoiceSynthesis.envelope(
                 at: local,
@@ -383,15 +383,15 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     @inline(__always)
     private func percussiveSample(
         at time: Double,
-        lower: Int,
-        upper: Int,
+        lower: Int64,
+        upper: Int64,
         plan: VoiceSchedule.Snapshot
     ) -> Float {
         var total: Float = 0
         for index in lower..<upper {
             total += VoiceSynthesis.percussiveSample(
                 type: type,
-                localTime: time - plan.attacks[index],
+                localTime: time - attackTime(at: index, in: plan),
                 frequency: smoothedFrequency,
                 sampleRate: renderSampleRate,
                 seed: seed
@@ -484,9 +484,42 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
         }
     }
 
-    /// Primer índice cuyo ataque es >= `time`. Sin asignaciones ni locks.
+    /// Primer índice virtual cuyo ataque es >= `time`. Para un preview coincide
+    /// con el índice de la losa; para Play avanza por vueltas sin almacenar una
+    /// agenda infinita ni volver a publicar desde el hilo principal.
     @inline(__always)
-    private func lowerBound(for time: TimeInterval, in plan: VoiceSchedule.Snapshot) -> Int {
+    private func playbackIndex(atOrAfter time: TimeInterval, in plan: VoiceSchedule.Snapshot) -> Int64 {
+        guard plan.count > 0 else { return 0 }
+        guard plan.repeatInterval.isFinite,
+              plan.repeatInterval > 0,
+              plan.loopStart.isFinite,
+              time > plan.loopStart
+        else { return Int64(lowerBoundInFirstLoop(for: time, in: plan)) }
+
+        let count = Int64(plan.count)
+        let rawCycle = floor((time - plan.loopStart) / plan.repeatInterval)
+        let maximumCycle = Double(Int64.max / count - 1)
+        let cycle = Int64(max(0, min(rawCycle, maximumCycle)))
+        let timeInFirstLoop = time - Double(cycle) * plan.repeatInterval
+        let baseIndex = lowerBoundInFirstLoop(for: timeInFirstLoop, in: plan)
+        if baseIndex < plan.count {
+            return cycle * count + Int64(baseIndex)
+        }
+        return (cycle + 1) * count
+    }
+
+    @inline(__always)
+    private func attackTime(at playbackIndex: Int64, in plan: VoiceSchedule.Snapshot) -> TimeInterval {
+        guard plan.repeatInterval > 0 else { return plan.attacks[Int(playbackIndex)] }
+        let count = Int64(plan.count)
+        let loop = playbackIndex / count
+        let baseIndex = Int(playbackIndex % count)
+        return plan.attacks[baseIndex] + Double(loop) * plan.repeatInterval
+    }
+
+    /// Búsqueda binaria dentro de la primera vuelta publicada.
+    @inline(__always)
+    private func lowerBoundInFirstLoop(for time: TimeInterval, in plan: VoiceSchedule.Snapshot) -> Int {
         var low = 0
         var high = plan.count
         while low < high {
