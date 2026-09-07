@@ -147,7 +147,7 @@ enum ParticleEffectSystem {
         switch type {
         case .pad: 0.22
         case .lead, .bass: 0.19
-        case .kick, .snare, .hiHat, .clap, .fx: 0.17
+        case .kick, .snare, .hiHat, .clap, .fx, .tom, .shaker, .bell, .marimba, .pluck, .organ: 0.17
         }
     }
 

@@ -27,6 +27,18 @@ struct NodeVisualStyle {
             .init(color: UIColor(red: 0.14, green: 0.82, blue: 0.94, alpha: 1), baseScale: 1.06, triggerScale: 1.2, waveScale: 2.1, idleAmplitude: 0.04, idleSpeed: 0.42, verticalOffset: 0.1)
         case .lead:
             .init(color: UIColor(red: 0.12, green: 1, blue: 0.62, alpha: 1), baseScale: 1, triggerScale: 1.24, waveScale: 1.65, idleAmplitude: 0.03, idleSpeed: 1.05, verticalOffset: 0.14)
+        case .tom:
+            .init(color: .systemOrange, baseScale: 1.02, triggerScale: 1.28, waveScale: 1.7, idleAmplitude: 0.014, idleSpeed: 0.85, verticalOffset: -0.06)
+        case .shaker:
+            .init(color: .systemYellow, baseScale: 0.9, triggerScale: 1.15, waveScale: 1.4, idleAmplitude: 0.02, idleSpeed: 2.3, verticalOffset: 0.09)
+        case .bell:
+            .init(color: .systemMint, baseScale: 0.96, triggerScale: 1.22, waveScale: 1.9, idleAmplitude: 0.025, idleSpeed: 0.65, verticalOffset: 0.12)
+        case .marimba:
+            .init(color: .systemBrown, baseScale: 1, triggerScale: 1.18, waveScale: 1.6, idleAmplitude: 0.015, idleSpeed: 0.8, verticalOffset: 0)
+        case .pluck:
+            .init(color: .systemPink, baseScale: 0.98, triggerScale: 1.24, waveScale: 1.7, idleAmplitude: 0.02, idleSpeed: 1.1, verticalOffset: 0.08)
+        case .organ:
+            .init(color: .systemIndigo, baseScale: 1.08, triggerScale: 1.16, waveScale: 2, idleAmplitude: 0.03, idleSpeed: 0.4, verticalOffset: 0.04)
         case .fx:
             .init(color: UIColor(red: 0.65, green: 0.24, blue: 1, alpha: 1), baseScale: 1, triggerScale: 1.27, waveScale: 1.75, idleAmplitude: 0.035, idleSpeed: 1.8, verticalOffset: 0.06)
         }

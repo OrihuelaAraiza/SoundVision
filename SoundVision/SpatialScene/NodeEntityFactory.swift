@@ -178,6 +178,38 @@ enum NodeEntityFactory {
             let beam = part("accent", mesh: .generateCylinder(height: 0.44, radius: 0.012), material: glow)
             crystal.orientation = simd_quatf(angle: .pi, axis: [1, 0, 0])
             return [crystal, beam]
+        case .tom:
+            return [part("node-core", mesh: .generateCylinder(height: 0.2, radius: 0.14), material: surface),
+                    part("accent", mesh: .generateCylinder(height: 0.015, radius: 0.16), material: glow, position: [0, 0.11, 0])]
+        case .shaker:
+            return [part("node-core", mesh: .generateCylinder(height: 0.26, radius: 0.085), material: surface),
+                    part("accent", mesh: .generateSphere(radius: 0.035), material: glow, position: [0, 0.2, 0])]
+        case .bell:
+            return [part("node-core", mesh: .generateCone(height: 0.25, radius: 0.17), material: surface),
+                    part("accent", mesh: .generateSphere(radius: 0.045), material: glow, position: [0, -0.14, 0])]
+        case .marimba:
+            var bars: [ModelEntity] = []
+            for index in -1...1 {
+                let depth: Float = 0.3 - Float(abs(index)) * 0.07
+                let mesh = MeshResource.generateBox(width: 0.075, height: 0.04, depth: depth, cornerRadius: 0.01)
+                let material: RealityKit.Material = index == 0 ? surface : glow
+                bars.append(part(index == 0 ? "node-core" : "accent", mesh: mesh,
+                                 material: material, position: [Float(index) * 0.095, 0, 0]))
+            }
+            return bars
+        case .pluck:
+            return [part("node-core", mesh: .generateSphere(radius: 0.12), material: surface),
+                    part("accent", mesh: .generateCylinder(height: 0.4, radius: 0.012), material: glow)]
+        case .organ:
+            var pipes: [ModelEntity] = []
+            for index in -1...1 {
+                let height: Float = 0.34 - Float(abs(index)) * 0.08
+                let mesh = MeshResource.generateCylinder(height: height, radius: 0.045)
+                let material: RealityKit.Material = index == 0 ? surface : glow
+                pipes.append(part(index == 0 ? "node-core" : "accent", mesh: mesh,
+                                  material: material, position: [Float(index) * 0.11, 0, 0]))
+            }
+            return pipes
         case .fx:
             let core = part("node-core", mesh: .generateBox(size: 0.18, cornerRadius: 0.055), material: surface)
             core.orientation = simd_quatf(angle: .pi / 4, axis: [1, 1, 0])

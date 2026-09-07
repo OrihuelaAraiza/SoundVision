@@ -15,7 +15,7 @@
 
 ### 0. Consola por pestañas
 
-1. La consola tiene tres pestañas: **Reproducir**, **Sonidos** y **Nodo**.
+1. La consola tiene cuatro pestañas: **Reproducir**, **Sonidos**, **Nodo** y **Aprender**.
    Confirma que en cada una **todo cabe sin tener que desplazar**.
 2. Selecciona un organismo y ve a **Nodo**: debe mostrar su inspector. Sin
    selección, debe explicar cómo seleccionar uno en vez de quedarse en blanco.
@@ -35,7 +35,7 @@
    aparecer**. Después todos los nodos de prueba deben desaparecer.
 5. En **Añadir sonido** toca `Kick` y confirma que aparece un nodo seleccionado
    y conectado a Play. Toca ahora `Bass`: debe aparecer **sin conexión**. En el
-   inspector de `Kick`, usa **Conectar hacia… → Bass** (o arrastra su punto
+   inspector de `Kick`, usa **Añadir salida → Bass** (o arrastra su punto
    luminoso hasta Bass) y confirma la línea. Añade un tercero: también debe
    aparecer libre y Play debe conservar **una sola salida**.
 6. Con la entrada de Play ya ocupada, tira del núcleo dentro del espacio y
@@ -139,7 +139,7 @@ Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
    del inspector y anótalo: significa que el arrastre 3D sigue fallando.
 3g. **Encadenar por decisión explícita.** Añade tres sonidos: solo el primero
    debe salir de Play y los otros dos deben nacer libres. Conecta primero →
-   segundo → tercero, mediante los hilos o **Conectar hacia…**. Reproduce y
+   segundo → tercero, mediante los hilos o **Añadir salida**. Reproduce y
    confirma que entran uno tras otro, no todos a la vez.
 3h. **Organismo incomunicado.** Corta la conexión que une una rama con Play y
    selecciona un organismo de esa rama: el inspector debe avisar en naranja de
@@ -198,3 +198,24 @@ La prueba es satisfactoria si:
 - Nodo, posición y gesto que produjo el problema.
 - Si el problema se repite después de detener y volver a reproducir.
 - Si la degradación aparece con un número concreto de nodos o ramas concurrentes.
+
+
+## Sonidos, conexiones y aprendizaje
+
+- [ ] En Sonidos, recorrer las tres familias y buscar Campana, Marimba y Órgano.
+      Añadir y escuchar los seis timbres nuevos; distinguirlos al mismo volumen.
+- [ ] Un origen con dos salidas fijas a 1 beat: ambas fuentes se oyen juntas.
+      Cambiar una a 2 beats: comprobar el orden y la vista de ataques.
+- [ ] Dos ramas que convergen: un ataque si coinciden; dos si sus tiempos difieren.
+      Probar un ciclo, un nodo muteado intermedio y varias vueltas completas.
+- [ ] Guardar tiempos fijos y ciclos; cargar, mover nodos y comprobar que se conservan.
+- [ ] Completar las cuatro prácticas desde una composición propia. Probar un
+      resultado incorrecto y después el correcto; terminar y verificar que regresan
+      notas, conexiones, tempo, selección e historial. Reiniciar la app y comprobar
+      el progreso guardado de las lecciones.
+- [ ] Probar controles de transporte desde todas las pestañas, selección por
+      nombre, menús de tiempos, deshacer y preescucha completa de sonidos largos.
+- [ ] Reabrir el estudio con Continuar composición. Cancelar una apertura y
+      comprobar que la composición no se borra.
+- [ ] Evaluar lectura, scroll, alcance de controles y fluidez con 14 y 32 nodos;
+      comprobar volumen mezclado, localización, oclusión y comodidad con el visor.

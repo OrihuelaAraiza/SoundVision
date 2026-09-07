@@ -18,7 +18,9 @@ una composición musical en un grafo 3D interactivo.
   a partir de los propios timestamps del render.
 - RealityKit Spatial Audio por nodo: HRTF personalizado, seguimiento espacial,
   acústica ambiental y atenuación de distancia administrados por Apple.
-- Ocho timbres sintetizados localmente (sin muestras de audio externas).
+- Catorce timbres sintetizados localmente: Kick, Snare, Hi-hat, Clap, Bass, Pad, Lead, FX, Tom, Shaker, Campana, Marimba, Pluck y Órgano.
+- Catálogo con búsqueda y familias de percusión, melodía y texturas.
+- Aprendizaje musical con cuatro ejercicios comprobables y progreso local.
 - Guardado y carga de la composición como JSON local.
 - Pruebas unitarias para el patrón, timing, bifurcaciones, ciclos y persistencia.
 - Identidad visual modular: nodos compuestos, núcleo reactivo, conexiones y ondas.
@@ -51,7 +53,7 @@ La sesión de validación en hardware está preparada en
 
 1. Abre `SoundVision.xcodeproj` en Xcode 26 o posterior.
 2. Selecciona un destino Apple Vision Pro (simulador o dispositivo).
-3. Ejecuta el esquema `SoundVision` y pulsa **Iniciar sesión**.
+3. Ejecuta el esquema `SoundVision` y elige **Nueva pista**, **Aprender música** o **Abrir demo espacial**.
 
 El proyecto compila shaders Metal. Si una instalación nueva de Xcode no incluye
 el componente, instálalo desde **Xcode > Settings > Components > Metal Toolchain**
@@ -167,7 +169,7 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 
 Conectar no requiere entrar en un modo: se tira de un hilo y se suelta donde
 quieras. Mientras está en el aire, el destino candidato se ilumina. El inspector
-también ofrece **Conectar hacia…** como alternativa precisa cuando la puntería
+también ofrece **Añadir salida** como alternativa precisa cuando la puntería
 espacial no resulte cómoda.
 
 ### De dónde nace cada sonido
@@ -175,7 +177,7 @@ espacial no resulte cómoda.
 Play es una entrada, no un distribuidor: solo puede iniciar un organismo. El
 primero que añadas se conecta automáticamente; todos los siguientes aparecen
 libres. La persona construye la frase enlazándolos con el hilo espacial o con
-**Conectar hacia…** en el inspector. Seleccionar un organismo nunca crea ni
+**Añadir salida** en el inspector. Seleccionar un organismo nunca crea ni
 cambia conexiones por su cuenta.
 
 Un organismo al que Play no llega por ningún camino no suena. El inspector lo
@@ -183,10 +185,10 @@ avisa en naranja y pide unirlo desde una rama alcanzable. Solo cuando Play qued�
 sin entrada —por ejemplo, tras cortar esa conexión— permite convertir un
 organismo en la nueva entrada; nunca crea un segundo inicio.
 
-La consola se organiza en tres pestañas —**Reproducir**, **Sonidos** y
-**Nodo**— para que cada pantalla quepa entera. En una sola columna con scroll,
-entre botones y sliders de ancho completo casi no quedaba zona neutra donde
-agarrar para desplazarla.
+La consola tiene cuatro pestañas: **Reproducir**, **Sonidos**, **Nodo** y
+**Aprender**. Reproducir/Detener y el estado permanecen al pie de todas ellas.
+El inspector permite elegir un nodo por nombre, editar entradas y salidas,
+afinar notas y desplegar los controles de posición y efectos cuando se necesitan.
 
 Si arrastrar con la mano se te resiste, la pestaña **Nodo** tiene sliders de
 posición por eje. Es la vía exacta para ordenar el grafo sin pelearse con la puntería a
@@ -209,3 +211,67 @@ ciérrala; la escultura sigue funcionando.
 
 El simulador valida la escena y la interacción básica. La percepción espacial,
 ergonomía, audio y comodidad deben validarse también en un Apple Vision Pro real.
+
+
+## Conexiones múltiples y orden musical
+
+Play conserva una única entrada. Cada organismo admite varias entradas y varias
+salidas. En **Nodo → Conexiones**, el menú de tiempo de cada salida permite
+seleccionar un retraso musical fijo (de ¼ a 32 beats) o volver a **Según distancia**.
+Los tiempos fijos se guardan en JSON y permanecen iguales al mover los nodos.
+
+- El destino entra cuando transcurre el retraso de su conexión desde el ataque del origen.
+- Dos salidas de 1 beat suenan juntas. Salidas de 1 y 2 beats suenan en ese orden.
+- Dos rutas al mismo nodo en el mismo instante producen un único ataque.
+- Si esas rutas llegan en instantes distintos, el nodo vuelve a sonar en cada llegada.
+- Un nodo muteado mantiene el paso del pulso hacia sus destinos.
+- Los ciclos internos recorren cada arista como máximo las veces configuradas por camino.
+  El patrón completo sigue repitiéndose hasta Detener o una edición de estructura/tiempo.
+
+**Reproducir → Ver orden de reproducción** muestra los ataques por beat, incluidos
+los nodos en silencio. El beat 0 es la entrada; una vuelta termina un beat después
+del último ataque. Cambiar estructura o tiempos detiene la agenda anterior:
+pulsa Reproducir para escuchar el nuevo recorrido. La afinación y el volumen se
+actualizan en vivo. Fija los sonidos y tiempos si solo quieres ordenar el espacio.
+
+La planificación usa una cola de prioridad y cuenta hasta 512 ataques únicos.
+También acota el trabajo de expansión del grafo. Si una composición supera esos
+límites, Play pide reducir los ciclos en vez de reproducir silenciosamente una
+parte del grafo. Los duplicados de una convergencia no consumen el límite de ataques.
+
+## Aprender música
+
+**Aprender** ofrece cuatro prácticas de unos tres minutos: pulso regular,
+melodía La–Do–Mi, acorde de La menor y convergencia de dos ramas. Cada práctica
+incluye explicación, reto, escena editable y comprobación de los tiempos/notas
+resultantes. Primero se inicia la reproducción; después se comprueba el ejercicio.
+La comprobación verifica la configuración musical, no que la persona haya oído el audio.
+
+Al entrar se reserva en memoria la composición actual, tempo, ciclos, selección e
+historial. **Terminar** los recupera, incluso después de cambiar de lección. El
+progreso se guarda localmente con AppStorage. La reserva temporal dura la sesión;
+conviene guardar la composición antes de cerrar la app. Las prácticas no sobrescriben
+el archivo de composición guardada.
+
+## Validación del núcleo sin simulador
+
+Ejecuta `Scripts/validate-core.sh` en macOS con Xcode. Compila los archivos reales
+de producción y ejecuta el callback de audio para todos los timbres: primer ataque,
+repetición, muestras finitas y Stop. También comprueba convergencias, orden estable,
+ciclos acotados, ejercicios, persistencia, tiempos fijos, restauración de la
+composición y su historial. No sustituye las pruebas de interacción, HRTF ni
+rendimiento del espacio inmersivo en Vision Pro.
+
+### Resultado de validación · 7 de septiembre de 2026
+
+- Compilación de la app y bundle de pruebas para simulador: correcta.
+- Compilación genérica para Vision Pro, sin firma: correcta.
+- Arnés ejecutado sobre código de producción: 14 timbres, repetición y Stop;
+  convergencias, límites y orden; cuatro lecciones; guardado/carga; tiempos fijos;
+  restauración de composición e historial; máximo de 32 voces y registro de notas.
+- XCTest en visionOS 26.5 no llegó a ejecutar los casos; se interrumpió el intento
+  al permanecer bloqueado el runtime. visionOS 2.5 también permaneció en negro
+  y no completó la instalación. No se considera validada la interfaz en simulador.
+- Pendientes en Vision Pro: mezcla/HRTF real, gestos, comodidad y fluidez con
+  escenas densas. La compilación conserva advertencias de aislamiento de actor
+  de RealityKit bajo comprobación estricta de concurrencia; el proyecto usa Swift 5.

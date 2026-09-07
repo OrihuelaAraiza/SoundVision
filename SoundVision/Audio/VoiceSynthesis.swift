@@ -42,6 +42,8 @@ enum VoiceSynthesis {
         case .snare: 0.26
         case .hiHat: 0.11
         case .clap: 0.32
+        case .tom: 0.55
+        case .shaker: 0.16
         default: 0.3
         }
     }
@@ -60,6 +62,28 @@ enum VoiceSynthesis {
         case .clap:
             .init(isPercussive: true, fundamental: 400, attack: 0, decay: 0, sustainLevel: 0,
                   release: 0, cutoff: 9_000, partials: [(1, 1)])
+        case .tom:
+            .init(isPercussive: true, fundamental: 110, attack: 0, decay: 0, sustainLevel: 0,
+                  release: 0, cutoff: 4_000, partials: [(1, 1)])
+        case .shaker:
+            .init(isPercussive: true, fundamental: 800, attack: 0, decay: 0, sustainLevel: 0,
+                  release: 0, cutoff: 8_000, partials: [(1, 1)])
+        case .bell:
+            .init(isPercussive: false, fundamental: 440, attack: 0.003, decay: 0.65,
+                  sustainLevel: 0.08, release: 0.55, cutoff: 7_000,
+                  partials: [(1, 1), (2.76, 0.42), (5.4, 0.2), (8.93, 0.08)])
+        case .marimba:
+            .init(isPercussive: false, fundamental: 220, attack: 0.002, decay: 0.3,
+                  sustainLevel: 0.03, release: 0.18, cutoff: 3_000,
+                  partials: [(1, 1), (4, 0.24), (10, 0.06)])
+        case .pluck:
+            .init(isPercussive: false, fundamental: 220, attack: 0.003, decay: 0.22,
+                  sustainLevel: 0.12, release: 0.2, cutoff: 4_800,
+                  partials: [(1, 1), (2, 0.5), (3, 0.28), (4, 0.15), (6, 0.07)])
+        case .organ:
+            .init(isPercussive: false, fundamental: 220, attack: 0.025, decay: 0.08,
+                  sustainLevel: 0.9, release: 0.16, cutoff: 5_000,
+                  partials: [(1, 1), (2, 0.7), (3, 0.4), (4, 0.32), (8, 0.12)])
         case .bass:
             .init(isPercussive: false, fundamental: 55, attack: 0.012, decay: 0.18,
                   sustainLevel: 0.75, release: 0.12, cutoff: 900,
@@ -202,7 +226,15 @@ enum VoiceSynthesis {
             let smoothed = (noise(sample: index, seed: seed) + noise(sample: index - 1, seed: seed)) / 2
             value = smoothed * amplitude
 
-        case .bass, .pad, .lead, .fx:
+        case .tom:
+            let phase = frequency * (localTime + 0.018 * (1 - exp(-localTime / 0.045)))
+            value = (sine(cycles: phase) + 0.2 * sine(cycles: phase * 1.6))
+                * Float(exp(-localTime / 0.14)) * 0.75
+        case .shaker:
+            let bright = noise(sample: index, seed: seed) - noise(sample: index - 1, seed: seed)
+            let swell = min(localTime / 0.018, 1) * exp(-localTime / 0.04)
+            value = bright * Float(swell) * 0.48
+        case .bass, .pad, .lead, .fx, .bell, .marimba, .pluck, .organ:
             return 0
         }
 

@@ -9,6 +9,7 @@ struct MainWindowView: View {
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @State private var isTransitioning = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -18,11 +19,12 @@ struct MainWindowView: View {
                 launcher
             }
         }
-        .animation(.snappy(duration: 0.25), value: state.isImmersiveSpaceOpen)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: state.isImmersiveSpaceOpen)
     }
 
     private var launcher: some View {
-        VStack(spacing: 26) {
+        ScrollView {
+        VStack(spacing: 22) {
             Spacer()
 
             Image(systemName: "waveform.path.ecg.rectangle")
@@ -49,8 +51,22 @@ struct MainWindowView: View {
             }
 
             VStack(spacing: 12) {
+                if !state.nodes.isEmpty {
+                    Button { Task { await start {} } } label: {
+                        Label("Continuar composición", systemImage: "arrow.uturn.forward")
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 Button {
-                    Task { await start { state.startNewComposition() } }
+                    Task { await start { state.studioSection = .learn } }
+                } label: {
+                    Label("Aprender música", systemImage: "graduationcap")
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                }
+                .buttonStyle(.bordered)
+                Button {
+                    Task { await start { state.startNewComposition(); state.studioSection = .sounds } }
                 } label: {
                     Label("Nueva pista", systemImage: "plus.rectangle.on.rectangle")
                         .frame(maxWidth: .infinity, minHeight: 42)
@@ -59,7 +75,7 @@ struct MainWindowView: View {
                 .tint(.cyan)
 
                 Button {
-                    Task { await start { state.loadSpatialTestScene() } }
+                    Task { await start { state.loadSpatialTestScene(); state.studioSection = .transport } }
                 } label: {
                     Label("Abrir demo espacial", systemImage: "ear.and.waveform")
                         .frame(maxWidth: .infinity, minHeight: 42)
@@ -68,7 +84,7 @@ struct MainWindowView: View {
                 .tint(.purple)
 
                 Button {
-                    Task { await start { state.load() } }
+                    Task { await start { state.load(); state.studioSection = .transport } }
                 } label: {
                     Label("Cargar composición guardada", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity, minHeight: 42)
@@ -96,18 +112,19 @@ struct MainWindowView: View {
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
         }
-        .padding(40)
+        .padding(32)
+        }
     }
 
     @MainActor
     private func start(_ prepare: () -> Void) async {
-        prepare()
-        guard !state.isImmersiveSpaceOpen else { return }
+        guard !isTransitioning, !state.isImmersiveSpaceOpen else { return }
         isTransitioning = true
         defer { isTransitioning = false }
 
         switch await openImmersiveSpace(id: ImmersiveSpaceID.soundLab) {
         case .opened:
+            prepare()
             state.isImmersiveSpaceOpen = true
         case .error:
             state.statusMessage = "No se pudo abrir el espacio inmersivo."

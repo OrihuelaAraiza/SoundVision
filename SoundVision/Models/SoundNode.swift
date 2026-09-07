@@ -1,7 +1,7 @@
 import Foundation
 
 enum SoundNodeType: String, Codable, CaseIterable, Sendable {
-    case kick, snare, hiHat, clap, bass, pad, lead, fx
+    case kick, snare, hiHat, clap, bass, pad, lead, fx, tom, shaker, bell, marimba, pluck, organ
 
     static func displayName(for type: SoundNodeType) -> String {
         switch type {
@@ -13,6 +13,12 @@ enum SoundNodeType: String, Codable, CaseIterable, Sendable {
         case .pad: "Pad"
         case .lead: "Lead"
         case .fx: "FX"
+        case .tom: "Tom"
+        case .shaker: "Shaker"
+        case .bell: "Campana"
+        case .marimba: "Marimba"
+        case .pluck: "Pluck"
+        case .organ: "Órgano"
         }
     }
 
@@ -26,11 +32,51 @@ enum SoundNodeType: String, Codable, CaseIterable, Sendable {
         case .pad: "cloud.fill"
         case .lead: "bolt.fill"
         case .fx: "sparkles"
+        case .tom: "circle.dotted"
+        case .shaker: "rain"
+        case .bell: "bell.fill"
+        case .marimba: "pianokeys"
+        case .pluck: "waveform"
+        case .organ: "music.note.list"
+        }
+    }
+}
+
+enum SoundFamily: String, CaseIterable {
+    case percussion = "Percusión", melody = "Melodía", texture = "Texturas"
+}
+
+extension SoundNodeType {
+    var family: SoundFamily {
+        switch self {
+        case .kick, .snare, .hiHat, .clap, .tom, .shaker: .percussion
+        case .bass, .lead, .bell, .marimba, .pluck: .melody
+        case .pad, .fx, .organ: .texture
+        }
+    }
+
+    var character: String {
+        switch self {
+        case .kick: "Grave y contundente"
+        case .snare: "Golpe seco"
+        case .hiHat: "Pulso brillante"
+        case .clap: "Palmas rítmicas"
+        case .bass: "Base profunda"
+        case .pad: "Atmósfera suave"
+        case .lead: "Melodía brillante"
+        case .fx: "Textura inarmónica"
+        case .tom: "Percusión resonante"
+        case .shaker: "Grano y movimiento"
+        case .bell: "Metal cristalino"
+        case .marimba: "Madera cálida"
+        case .pluck: "Cuerda pulsada"
+        case .organ: "Armónicos sostenidos"
         }
     }
 }
 
 struct SoundNode: Identifiable, Codable, Equatable, Sendable {
+    static let maximumCount = 32
     let id: UUID
     var name: String
     var type: SoundNodeType
@@ -152,16 +198,19 @@ struct SoundConnection: Identifiable, Codable, Equatable, Sendable {
     var sourceNodeID: UUID?
     var destinationNodeID: UUID
     var durationBeats: Double
+    /// El tiempo manual se conserva al mover y al cargar.
+    var usesSpatialTiming: Bool
 
-    init(id: UUID = UUID(), sourceNodeID: UUID?, destinationNodeID: UUID, durationBeats: Double = 1) {
+    init(id: UUID = UUID(), sourceNodeID: UUID?, destinationNodeID: UUID, durationBeats: Double = 1, usesSpatialTiming: Bool = true) {
         self.id = id
         self.sourceNodeID = sourceNodeID
         self.destinationNodeID = destinationNodeID
+        self.usesSpatialTiming = usesSpatialTiming
         self.durationBeats = durationBeats
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sourceNodeID, destinationNodeID, durationBeats
+        case id, sourceNodeID, destinationNodeID, durationBeats, usesSpatialTiming
     }
 
     init(from decoder: Decoder) throws {
@@ -169,6 +218,7 @@ struct SoundConnection: Identifiable, Codable, Equatable, Sendable {
         id = try values.decode(UUID.self, forKey: .id)
         sourceNodeID = try values.decodeIfPresent(UUID.self, forKey: .sourceNodeID)
         destinationNodeID = try values.decode(UUID.self, forKey: .destinationNodeID)
+        usesSpatialTiming = try values.decodeIfPresent(Bool.self, forKey: .usesSpatialTiming) ?? true
         durationBeats = try values.decodeIfPresent(Double.self, forKey: .durationBeats) ?? 1
     }
 }
@@ -179,21 +229,24 @@ struct Composition: Codable, Equatable, Sendable {
     var steps: Int
     var nodes: [SoundNode]
     var connections: [SoundConnection]
+    var loopPasses: Int
 
-    init(title: String, bpm: Double, steps: Int, nodes: [SoundNode], connections: [SoundConnection] = []) {
+    init(title: String, bpm: Double, steps: Int, nodes: [SoundNode], connections: [SoundConnection] = [], loopPasses: Int = 2) {
         self.title = title
         self.bpm = bpm
         self.steps = steps
         self.nodes = nodes
         self.connections = connections
+        self.loopPasses = loopPasses
     }
 
     private enum CodingKeys: String, CodingKey {
-        case title, bpm, steps, nodes, connections
+        case title, bpm, steps, nodes, connections, loopPasses
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        loopPasses = try values.decodeIfPresent(Int.self, forKey: .loopPasses) ?? 2
         title = try values.decode(String.self, forKey: .title)
         bpm = try values.decode(Double.self, forKey: .bpm)
         steps = try values.decodeIfPresent(Int.self, forKey: .steps) ?? 16
@@ -286,7 +339,8 @@ extension Composition {
             bpm: bpm.isFinite ? Swift.max(40, Swift.min(bpm, 240)) : 120,
             steps: Swift.max(1, Swift.min(steps, 128)),
             nodes: uniqueNodes,
-            connections: cleanConnections
+            connections: cleanConnections,
+            loopPasses: max(1, min(loopPasses, 8))
         )
     }
 }

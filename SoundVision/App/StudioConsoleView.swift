@@ -8,6 +8,9 @@ import SwiftUI
 struct StudioConsoleView: View {
     @EnvironmentObject private var state: CompositionState
     let onExit: () -> Void
+    @State private var family: SoundFamily = .percussion
+    @State private var search = ""
+    @State private var showsOrder = false
 
 
     /// Todo cabía en una sola columna con scroll, pero creció hasta no caber en
@@ -15,15 +18,22 @@ struct StudioConsoleView: View {
     /// zona neutra donde agarrar para desplazarla. En pestañas cada pantalla es
     /// corta y no depende del scroll para alcanzar nada.
     var body: some View {
-        TabView {
-            Tab("Reproducir", systemImage: "play.circle") {
+        TabView(selection: $state.studioSection) {
+            Tab("Reproducir", systemImage: "play.circle", value: StudioSection.transport) {
                 page { transportSection; if state.isSpatialTestScene { guideSection } }
             }
-            Tab("Sonidos", systemImage: "square.grid.2x2") {
+            Tab("Sonidos", systemImage: "square.grid.2x2", value: StudioSection.sounds) {
                 page { instrumentSection; compositionSection }
             }
-            Tab("Nodo", systemImage: "slider.horizontal.3") {
+            Tab("Nodo", systemImage: "slider.horizontal.3", value: StudioSection.node) {
                 page {
+                    if !state.nodes.isEmpty {
+                        Picker("Sonido", selection: $state.selectedNodeID) {
+                            Text("Seleccionar…").tag(nil as UUID?)
+                            ForEach(state.nodes) { node in Text(node.name).tag(Optional(node.id)) }
+                        }
+                        .pickerStyle(.menu)
+                    }
                     if state.selectedNode == nil {
                         ContentUnavailableView(
                             "Ningún organismo seleccionado",
@@ -35,8 +45,16 @@ struct StudioConsoleView: View {
                     }
                 }
             }
+            Tab("Aprender", systemImage: "graduationcap", value: StudioSection.learn) {
+                page { MusicLearningView() }
+            }
         }
         .navigationTitle("SoundVision")
+        .safeAreaInset(edge: .bottom, spacing: 0) { playbackBar }
+        .sheet(isPresented: $showsOrder) { PlaybackOrderView() }
+        .onChange(of: state.selectedNodeID) { _, id in
+            if id != nil && state.studioSection == .transport { state.studioSection = .node }
+        }
     }
 
     /// Encabezado común más el contenido de la pestaña. El scroll se conserva
@@ -95,18 +113,54 @@ struct StudioConsoleView: View {
         }
     }
 
+    private var playbackBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 14) {
+                Button { state.togglePlayback() } label: {
+                    Label(state.graphTransport.isPlaying ? "Detener" : "Reproducir",
+                          systemImage: state.graphTransport.isPlaying ? "stop.fill" : "play.fill")
+                        .frame(minHeight: 30)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(state.graphTransport.isPlaying ? .pink : .cyan)
+                .disabled(state.playEntryNodeID == nil)
+                Spacer(minLength: 0)
+                Text("\(Int(state.sequencer.bpm)) BPM")
+                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                if state.activeLesson != nil && state.studioSection != .learn {
+                    Button { state.studioSection = .learn } label: {
+                        Image(systemName: "graduationcap")
+                    }
+                    .accessibilityLabel("Volver a la práctica")
+                }
+            }
+            if let problem = state.audioProblem {
+                Label(problem, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+            }
+            if let message = state.statusMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 26).padding(.vertical, 14)
+        .background(.regularMaterial)
+    }
+
     private var transportSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Button { state.togglePlayback() } label: {
-                Label(
-                    state.graphTransport.isPlaying ? "Detener" : "Reproducir",
-                    systemImage: state.graphTransport.isPlaying ? "stop.fill" : "play.fill"
-                )
-                .frame(maxWidth: .infinity, minHeight: 40)
+            Text("Tu música, en movimiento").font(.title2.bold())
+            Text("Conecta los sonidos, decide cuándo entran y escucha el patrón en loop.")
+                .font(.callout).foregroundStyle(.secondary)
+            Button { showsOrder = true } label: {
+                Label("Ver orden de reproducción", systemImage: "list.number")
+                    .frame(maxWidth: .infinity, minHeight: 30)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(state.graphTransport.isPlaying ? .pink : .cyan)
-            .disabled(state.playEntryNodeID == nil)
+            .buttonStyle(.bordered)
+            let disconnected = state.unreachableNodeIDs().count
+            if disconnected > 0 {
+                Label("\(disconnected) sonidos sin ruta desde Play. Conéctalos desde la pestaña Nodo.", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.caption).foregroundStyle(.orange)
+            }
 
             if state.playEntryNodeID == nil {
                 Label(
@@ -156,18 +210,12 @@ struct StudioConsoleView: View {
             // tasa rinden, cuánto nivel están sacando y por dónde sale: con eso
             // una prueba con el visor puesto deja de ser adivinanza.
             if let diagnostics = state.audioDiagnostics {
-                Label(diagnostics, systemImage: "waveform.badge.magnifyingglass")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("Diagnóstico de audio") {
+                    Text(diagnostics).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                .font(.caption)
             }
 
-            if let message = state.statusMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -233,8 +281,22 @@ struct StudioConsoleView: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
             }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                ForEach(SoundNodeType.allCases, id: \.self) { type in
+            TextField("Buscar sonidos", text: $search)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityLabel("Buscar sonidos por nombre o carácter")
+            Picker("Familia", selection: $family) {
+                ForEach(SoundFamily.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            let filtered = SoundNodeType.allCases.filter {
+                search.isEmpty ? $0.family == family
+                    : SoundNodeType.displayName(for: $0).localizedStandardContains(search) || $0.character.localizedStandardContains(search)
+            }
+            if filtered.isEmpty {
+                ContentUnavailableView.search(text: search)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 175))], spacing: 10) {
+                ForEach(filtered, id: \.self) { type in
                     let style = NodeVisualStyle.style(for: type)
                     Button {
                         state.createNode(of: type)
@@ -242,10 +304,11 @@ struct StudioConsoleView: View {
                         HStack(spacing: 9) {
                             Image(systemName: SoundNodeType.icon(for: type))
                                 .foregroundStyle(Color(uiColor: style.color))
-                            Text(SoundNodeType.displayName(for: type))
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(SoundNodeType.displayName(for: type)).font(.callout.weight(.semibold))
+                                Text(type.character).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .lineLimit(1).minimumScaleFactor(0.8)
                             Spacer()
                         }
                         .frame(minHeight: 38)
@@ -253,6 +316,17 @@ struct StudioConsoleView: View {
                     .buttonStyle(.bordered)
                     .disabled(state.nodes.count >= AudioEngineManager.maximumVoices)
                 }
+            }
+            if let node = state.selectedNode {
+                HStack {
+                    Button { state.previewSelectedNode() } label: {
+                        Label("Escuchar \(node.name)", systemImage: "speaker.wave.2")
+                    }
+                    .disabled(!node.isActive)
+                    Spacer(minLength: 4)
+                    Button("Editar") { state.studioSection = .node }
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
@@ -329,19 +403,25 @@ struct StudioConsoleView: View {
                 .tint(.cyan)
 
                 reachabilityWarning(for: node)
-                connectionControls(for: node)
+                ConnectionEditorView(node: node)
 
-                positionControls(for: node)
+                if !VoiceSynthesis.isPercussive(node.type) {
+                    Stepper(value: Binding(get: { Double(node.pitch) }, set: { state.setPitch(id: node.id, semitones: Float($0)) }),
+                            in: -24...24, step: 1) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Afinación · \(SpatialParameterMapper.noteName(for: node))")
+                            Text("\(Int(node.pitch)) st · Ajustar fija el sonido").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                DisclosureGroup("Posición en el espacio") { positionControls(for: node) }
 
-                parameter(
-                    "Altura · Nota",
-                    value: "\(SpatialParameterMapper.noteName(forSemitones: node.pitch))  (\(String(format: "%+.0f", node.pitch)) st)"
-                )
-                parameter("Profundidad · Volumen", value: "\(Int(node.volume * 100)) %")
-                parameter("Distancia · Duración", value: String(format: "%.2f beats", node.durationBeats))
-                parameter("Rotación X · Reverb", value: "\(Int(node.reverb * 100)) %")
-                parameter("Rotación Y · Delay", value: "\(Int(node.delay * 100)) %")
-                parameter("Rotación Z · Distorsión", value: "\(Int(node.distortion * 100)) %")
+                DisclosureGroup("Detalles del sonido") {
+                    parameter("Volumen", value: "\(Int(node.volume * 100)) %")
+                    parameter("Reverb", value: "\(Int(node.reverb * 100)) %")
+                    parameter("Delay", value: "\(Int(node.delay * 100)) %")
+                    parameter("Distorsión", value: "\(Int(node.distortion * 100)) %")
+                }
 
                 Button { state.previewSelectedNode() } label: {
                     Label("Escuchar desde aquí", systemImage: "speaker.wave.2.fill")
@@ -391,96 +471,13 @@ struct StudioConsoleView: View {
                 Button { state.save() } label: {
                     Label("Guardar", systemImage: "square.and.arrow.down")
                 }
+                .disabled(state.activeLesson != nil)
                 Button { state.load() } label: {
                     Label("Cargar", systemImage: "square.and.arrow.up")
                 }
             }
             .buttonStyle(.bordered)
         }
-    }
-
-    /// Alternativa precisa al gesto espacial. La persona sigue decidiendo cada
-    /// enlace, pero no depende de la puntería de manos para construir o corregir
-    /// una ruta compleja.
-    private func connectionControls(for source: SoundNode) -> some View {
-        let availableTargets = state.nodes.filter { candidate in
-            candidate.id != source.id
-                && !state.connections.contains {
-                    $0.sourceNodeID == source.id && $0.destinationNodeID == candidate.id
-                }
-        }
-        let outgoing = state.connections.filter { $0.sourceNodeID == source.id }
-        let playConnection = state.connections.first {
-            $0.sourceNodeID == nil && $0.destinationNodeID == source.id
-        }
-
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("CONEXIONES DESDE ESTE ORGANISMO")
-                .font(.caption2.weight(.bold))
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-
-            if let playConnection {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill").foregroundStyle(.cyan)
-                    Text("Entrada única: Play → \(source.name)")
-                        .font(.caption)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    Button(role: .destructive) {
-                        state.removeConnection(id: playConnection.id)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Quitar entrada de Play")
-                }
-            }
-
-            Menu {
-                ForEach(availableTargets) { target in
-                    Button {
-                        _ = state.connect(sourceID: source.id, destinationID: target.id)
-                    } label: {
-                        Label(target.name, systemImage: SoundNodeType.icon(for: target.type))
-                    }
-                }
-            } label: {
-                Label("Conectar hacia…", systemImage: "arrow.turn.down.right")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(availableTargets.isEmpty)
-
-            if outgoing.isEmpty {
-                Text("Sin salidas. Este organismo será el final de su rama.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(outgoing) { connection in
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.right")
-                            .foregroundStyle(.cyan)
-                        Text(state.node(id: connection.destinationNodeID)?.name ?? "Destino eliminado")
-                            .font(.caption)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(String(format: "%.2f beats", connection.durationBeats))
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive) {
-                            state.removeConnection(id: connection.id)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Cortar conexión")
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .background(.cyan.opacity(0.08), in: .rect(cornerRadius: 12))
     }
 
     /// Colocación exacta desde la ventana. El arrastre con la mano sigue siendo

@@ -7,7 +7,7 @@ final class SoundVisionTests: XCTestCase {
         let nodes = SoundNode.starterPattern()
         XCTAssertEqual(nodes.count, 8)
         XCTAssertEqual(nodes.map(\.stepIndex), [0, 2, 4, 6, 8, 10, 12, 14])
-        XCTAssertEqual(Set(nodes.map(\.type)), Set(SoundNodeType.allCases))
+        XCTAssertEqual(Set(nodes.map(\.type)), Set([.kick, .snare, .hiHat, .clap, .bass, .pad, .lead, .fx]))
     }
 
     func testCompositionRoundTrip() throws {

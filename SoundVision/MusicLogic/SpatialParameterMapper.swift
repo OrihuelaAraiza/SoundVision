@@ -35,12 +35,18 @@ enum SpatialParameterMapper {
     static func noteName(forSemitones semitones: Float) -> String {
         let names = ["Do", "Do♯", "Re", "Re♯", "Mi", "Fa", "Fa♯", "Sol", "Sol♯", "La", "La♯", "Si"]
         guard semitones.isFinite else { return "—" }
-        let rounded = Int(clamp(semitones, min: -48, max: 48).rounded())
+        let rounded = Int(clamp(semitones, min: -96, max: 96).rounded())
         // La referencia es La central: el 0 de la escala.
         let absolute = rounded + 9
         let octave = Int(floor(Double(absolute) / 12)) + 4
         let index = absolute - Int(floor(Double(absolute) / 12)) * 12
         return "\(names[index])\(octave)"
+    }
+
+    static func noteName(for node: SoundNode) -> String {
+        guard !VoiceSynthesis.isPercussive(node.type) else { return "Percusión" }
+        let baseOffset = Float(12 * log2(VoiceSynthesis.spec(for: node.type).fundamental / 440))
+        return noteName(forSemitones: node.pitch + baseOffset)
     }
 
     /// En coordenadas locales, un Z mayor está más cerca del usuario.

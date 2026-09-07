@@ -2,6 +2,8 @@ import Combine
 import Foundation
 import simd
 
+enum StudioSection: Hashable { case transport, sounds, node, learn }
+
 @MainActor
 final class CompositionState: ObservableObject {
     nonisolated static let playNodePosition = SIMD3<Float>(0, SpatialParameterMapper.neutralHeight, 0)
@@ -15,11 +17,15 @@ final class CompositionState: ObservableObject {
     /// Ahora viajan por este callback directo a las entidades de la escena.
     private(set) var soundingNodeIDs: Set<UUID> = []
     var onSoundingChanged: ((Set<UUID>) -> Void)?
+    @Published var studioSection: StudioSection = .transport
     @Published var selectedNodeID: UUID?
     @Published var statusMessage: String?
     @Published var spatialAudioSession: SpatialAudioSession?
     @Published var isSpatialTestScene = false
     @Published var testStep = 0
+    @Published private(set) var activeLesson: MusicLesson?
+    @Published private(set) var lessonHasPlayed = false
+    private var learningBackup: (composition: Composition, selectedID: UUID?, undo: [UndoEntry], isDemo: Bool)?
     @Published private(set) var sceneContentRevision = 0
     @Published private(set) var undoLabel: String?
     /// Solo tiene valor cuando el motor de audio tiene algo que reportar.
@@ -40,6 +46,8 @@ final class CompositionState: ObservableObject {
         let connections: [SoundConnection]
         let selectedNodeID: UUID?
         let isSpatialTestScene: Bool
+        let bpm: Double
+        let loopPasses: Int
     }
 
     init(storage: CompositionStorage = CompositionStorage()) {
@@ -113,7 +121,8 @@ final class CompositionState: ObservableObject {
             nodes: nodes,
             connections: connections,
             selectedNodeID: selectedNodeID,
-            isSpatialTestScene: isSpatialTestScene
+            isSpatialTestScene: isSpatialTestScene,
+            bpm: sequencer.bpm, loopPasses: graphTransport.loopPasses
         ))
         if undoStack.count > 24 { undoStack.removeFirst() }
         undoLabel = label
@@ -122,6 +131,8 @@ final class CompositionState: ObservableObject {
     func undo() {
         guard let entry = undoStack.popLast() else { return }
         stopPlayback()
+        sequencer.bpm = entry.bpm
+        graphTransport.loopPasses = entry.loopPasses
         nodes = entry.nodes
         connections = entry.connections
         selectedNodeID = entry.selectedNodeID
@@ -165,6 +176,7 @@ final class CompositionState: ObservableObject {
     func connect(sourceID: UUID?, destinationID: UUID) -> Bool {
         guard canConnect(sourceID: sourceID, destinationID: destinationID) else { return false }
         recordUndo("Crear conexión")
+        stopPlayback()
         appendConnection(sourceID: sourceID, destinationID: destinationID)
         let sourceName = sourceID.flatMap { node(id: $0)?.name } ?? "Play"
         let destinationName = node(id: destinationID)?.name ?? "organismo"
@@ -238,6 +250,11 @@ final class CompositionState: ObservableObject {
         of type: SoundNodeType,
         at position: SIMD3<Float>? = nil
     ) -> UUID {
+        guard nodes.count < SoundNode.maximumCount else {
+            statusMessage = "Límite de 32 sonidos alcanzado. Elimina uno para añadir otro."
+            return selectedNodeID ?? nodes.last!.id
+        }
+        stopPlayback()
         let finalPosition = clamped(position ?? freeSpawnPosition())
         recordUndo("Añadir \(SoundNodeType.displayName(for: type))")
         let name = uniqueName(for: type)
@@ -368,14 +385,16 @@ final class CompositionState: ObservableObject {
                 return session.leadInSeconds
             },
             onVisualTrigger: { [weak self] node in
+                guard self?.node(id: node.id)?.isActive == true else { return }
                 self?.triggerVisualPulse(for: node.id)
             }
         )
         if didStart {
+            if activeLesson != nil { lessonHasPlayed = true }
             statusMessage = "Loop activo desde \(playEntryNode?.name ?? "la entrada"). Pulsa Detener para terminar."
         } else {
             spatialAudioSession = nil
-            statusMessage = "No se pudo construir una ruta reproducible desde Play."
+            statusMessage = "La ruta es demasiado compleja. Reduce las vueltas internas o corta un ciclo antes de reproducir."
         }
     }
 
@@ -399,13 +418,17 @@ final class CompositionState: ObservableObject {
 
         previewClearTask?.cancel()
         previewClearTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.35))
+            let held = (session.sustainBeats[node.id] ?? 1.2) * session.secondsPerBeat
+            let duration = VoiceSynthesis.duration(for: node.type, sustainSeconds: held)
+            let delayTail = node.delay > 0 ? 2 * (0.07 + Double(node.delay) * 0.48) : 0
+            try? await Task.sleep(for: .seconds(session.leadInSeconds + duration + max(0.4, delayTail)))
             guard let self, !Task.isCancelled, self.spatialAudioSession?.id == session.id else { return }
             self.spatialAudioSession = nil
         }
     }
 
     func loadSpatialTestScene() {
+        finishLesson()
         recordUndo("Abrir demo")
         stopPlayback()
         sequencer.bpm = 92
@@ -466,6 +489,10 @@ final class CompositionState: ObservableObject {
     }
 
     func save() {
+        guard activeLesson == nil else {
+            statusMessage = "Termina la práctica para volver a guardar tu composición."
+            return
+        }
         do {
             try storage.save(snapshot)
             statusMessage = "Composición espacial guardada."
@@ -477,9 +504,11 @@ final class CompositionState: ObservableObject {
     func load() {
         do {
             let composition = try storage.load().sanitized()
+            finishLesson()
             recordUndo("Cargar composición")
             stopPlayback()
             sequencer.bpm = composition.bpm
+            graphTransport.loopPasses = composition.loopPasses
             nodes = composition.nodes
             connections = composition.connections
             selectedNodeID = nil
@@ -497,6 +526,7 @@ final class CompositionState: ObservableObject {
     }
 
     func startNewComposition(message: String = "Nueva pista lista. Elige un sonido del cajón para comenzar.") {
+        finishLesson()
         if !nodes.isEmpty { recordUndo("Vaciar el lienzo") }
         stopPlayback()
         nodes = []
@@ -509,7 +539,7 @@ final class CompositionState: ObservableObject {
     }
 
     var snapshot: Composition {
-        Composition(title: "Anatomía del Sonido", bpm: sequencer.bpm, steps: Sequencer.totalSteps, nodes: nodes, connections: connections)
+        Composition(title: "Anatomía del Sonido", bpm: sequencer.bpm, steps: Sequencer.totalSteps, nodes: nodes, connections: connections, loopPasses: graphTransport.loopPasses)
     }
 
     private func triggerVisualPulse(for nodeID: UUID, delay: TimeInterval = 0) {
@@ -562,16 +592,91 @@ final class CompositionState: ObservableObject {
         let endpointIsLocked = [connection.sourceNodeID, connection.destinationNodeID]
             .compactMap { $0 }
             .contains { node(id: $0)?.isSoundLocked == true }
-        guard !endpointIsLocked else { return }
+        guard !endpointIsLocked, connection.usesSpatialTiming else { return }
 
         let source = connection.sourceNodeID.flatMap(position(of:)) ?? Self.playNodePosition
         guard let destination = position(of: connection.destinationNodeID) else { return }
-        connections[index].durationBeats = SpatialParameterMapper.durationBeats(from: source, to: destination)
+        let beats = SpatialParameterMapper.durationBeats(from: source, to: destination)
+        if abs(connections[index].durationBeats - beats) > 0.0001 {
+            if graphTransport.isPlaying {
+                stopPlayback()
+                statusMessage = "Ritmo actualizado por la distancia. Pulsa Reproducir para escuchar la nueva ruta."
+            }
+            connections[index].durationBeats = beats
+        }
     }
 
     private func recalculateDurationSummary(for nodeID: UUID) {
         guard let index = nodes.firstIndex(where: { $0.id == nodeID }) else { return }
-        nodes[index].durationBeats = connections.first(where: { $0.destinationNodeID == nodeID })?.durationBeats ?? 1
+        nodes[index].durationBeats = connections.filter { $0.destinationNodeID == nodeID }.map(\.durationBeats).min() ?? 1
+    }
+
+    func setConnectionBeats(id: UUID, beats: Double) {
+        guard beats.isFinite, let index = connections.firstIndex(where: { $0.id == id }),
+              connections[index].sourceNodeID != nil else { return }
+        let value = max(0.0625, min(beats, 32))
+        guard connections[index].usesSpatialTiming || connections[index].durationBeats != value else { return }
+        recordUndo("Ajustar tiempo")
+        stopPlayback()
+        connections[index].usesSpatialTiming = false
+        connections[index].durationBeats = value
+        recalculateDurationSummary(for: connections[index].destinationNodeID)
+        statusMessage = "Tiempo fijo: \(String(format: "%.2f", value)) beats. Pulsa Reproducir para escucharlo."
+    }
+
+    func useSpatialTiming(id: UUID) {
+        guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("Usar tiempo espacial")
+        stopPlayback()
+        connections[index].usesSpatialTiming = true
+        recalculateConnection(at: index)
+        recalculateDurationSummary(for: connections[index].destinationNodeID)
+        statusMessage = "La distancia controla el tiempo; un extremo con sonido fijo lo mantiene congelado."
+    }
+
+    func setPitch(id: UUID, semitones: Float) {
+        guard semitones.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("Afinar sonido")
+        nodes[index].pitch = max(-24, min(semitones.rounded(), 24))
+        nodes[index].isSoundLocked = true
+    }
+
+    func beginLesson(_ lesson: MusicLesson) {
+        if learningBackup == nil {
+            learningBackup = (snapshot, selectedNodeID, undoStack, isSpatialTestScene)
+        }
+        stopPlayback()
+        let practice = lesson.composition()
+        nodes = practice.nodes
+        connections = practice.connections
+        sequencer.bpm = practice.bpm
+        graphTransport.loopPasses = practice.loopPasses
+        selectedNodeID = nodes.first?.id
+        isSpatialTestScene = false
+        undoStack = []
+        undoLabel = nil
+        activeLesson = lesson
+        lessonHasPlayed = false
+        sceneContentRevision &+= 1
+        statusMessage = "Práctica lista. Tu composición está reservada hasta que termines."
+    }
+
+    func finishLesson() {
+        guard let backup = learningBackup else { return }
+        stopPlayback()
+        nodes = backup.composition.nodes
+        connections = backup.composition.connections
+        sequencer.bpm = backup.composition.bpm
+        graphTransport.loopPasses = backup.composition.loopPasses
+        selectedNodeID = backup.selectedID
+        isSpatialTestScene = backup.isDemo
+        undoStack = backup.undo
+        undoLabel = undoStack.last?.label
+        learningBackup = nil
+        activeLesson = nil
+        lessonHasPlayed = false
+        sceneContentRevision &+= 1
+        statusMessage = "De vuelta en tu composición."
     }
 
     private func position(of nodeID: UUID) -> SIMD3<Float>? {
