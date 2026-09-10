@@ -6,9 +6,16 @@ enum SoundParameter { case volume, reverb, delay, distortion }
 
 enum StudioSection: Hashable { case transport, sounds, node, learn }
 
+enum ConnectionEndpoint: Equatable {
+    case play
+    case node(UUID)
+}
+
 @MainActor
 final class CompositionState: ObservableObject {
-    nonisolated static let playNodePosition = SIMD3<Float>(0, SpatialParameterMapper.neutralHeight, 0)
+    // La ventana del sistema abre en el centro. Despejar ese eje evita que el
+    // collider de Play capture los gestos dirigidos a la consola.
+    nonisolated static let playNodePosition = SIMD3<Float>(-1.05, SpatialParameterMapper.neutralHeight, -0.15)
 
     @Published var nodes: [SoundNode]
     @Published var connections: [SoundConnection]
@@ -198,6 +205,31 @@ final class CompositionState: ObservableObject {
         let destinationName = node(id: destinationID)?.name ?? "organismo"
         statusMessage = "Conexión creada: \(sourceName) → \(destinationName)."
         return true
+    }
+
+    /// Un hilo une una rama libre a la ruta que ya nace de Play, aunque la
+    /// mano empiece por la rama libre. Entre nodos alcanzables se conserva la
+    /// dirección del gesto para permitir convergencias y ciclos explícitos.
+    @discardableResult
+    func connectByDragging(from source: ConnectionEndpoint, to target: ConnectionEndpoint) -> Bool {
+        switch (source, target) {
+        case (.play, .node(let id)), (.node(let id), .play):
+            guard playEntryNodeID == nil else {
+                statusMessage = "Play ya tiene una entrada. Corta su conexión antes de elegir otra."
+                return false
+            }
+            return connect(sourceID: nil, destinationID: id)
+        case (.node(let sourceID), .node(let targetID)):
+            let unreachable = unreachableNodeIDs()
+            let joinsExistingRoute = unreachable.contains(sourceID) && !unreachable.contains(targetID)
+            let didConnect = joinsExistingRoute
+                ? connect(sourceID: targetID, destinationID: sourceID)
+                : connect(sourceID: sourceID, destinationID: targetID)
+            if !didConnect { statusMessage = "Esos organismos ya estaban conectados." }
+            return didConnect
+        case (.play, .play):
+            return false
+        }
     }
 
     private func canConnect(sourceID: UUID?, destinationID: UUID) -> Bool {

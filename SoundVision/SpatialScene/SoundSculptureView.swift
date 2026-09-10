@@ -71,8 +71,18 @@ struct SoundSculptureView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { return }
+                if let root = scene.root {
+                    // Reintentar también fuera de RealityView.update: una
+                    // entidad puede activarse después de la última pasada.
+                    audioEngine.attachVoices(for: state.nodes, sustainBeats: state.sustainBeatsByNode()) { id in
+                        scene.entity(for: id, in: root)
+                    }
+                    audioEngine.publish(session: state.spatialAudioSession)
+                    audioEngine.recoverStalledVoices()
+                }
                 let summary = audioEngine.diagnosticsSummary()
                 if summary != state.audioDiagnostics { state.audioDiagnostics = summary }
+                reportAudioProblem()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) {
@@ -159,10 +169,7 @@ struct SoundSculptureView: View {
         DragGesture(minimumDistance: 8)
             .targetedToAnyEntity()
             .onChanged { value in
-                guard let root = sculptureRoot(from: value.entity),
-                      let id = NodeEntityFactory.id(from: value.entity),
-                      let node = state.node(id: id)
-                else { return }
+                guard let root = sculptureRoot(from: value.entity) else { return }
 
                 // El seguimiento puede entregar una coordenada no finita durante
                 // un frame al perder una mano. Nunca debe llegar a una transformada
@@ -171,12 +178,21 @@ struct SoundSculptureView: View {
                     value.convert(value.location3D, from: .local, to: root)
                 )
 
+                if TransportNodeFactory.isTransportEntity(value.entity) {
+                    scene.connectionSource = .play
+                    updateTendril(from: .play, to: current,
+                                  candidate: connectionTarget(at: current, excluding: .play, in: root), in: root)
+                    return
+                }
+                guard let id = NodeEntityFactory.id(from: value.entity),
+                      let node = state.node(id: id) else { return }
+
                 // Tirar del conector traza un hilo; tirar del cuerpo mueve el
                 // organismo. Un mismo gesto, dos intenciones, sin ningún modo.
-                if scene.connectionSourceID == id || NodeEntityFactory.isConnector(value.entity) {
-                    scene.connectionSourceID = id
-                    let candidate = state.nearestNode(to: current, excluding: id, within: connectionSnapRadius)
-                    updateTendril(from: node, to: current, candidate: candidate, in: root)
+                if scene.connectionSource == .node(id) || NodeEntityFactory.isConnector(value.entity) {
+                    scene.connectionSource = .node(id)
+                    let candidate = connectionTarget(at: current, excluding: .node(id), in: root)
+                    updateTendril(from: .node(id), to: current, candidate: candidate, in: root)
                     return
                 }
 
@@ -212,22 +228,28 @@ struct SoundSculptureView: View {
                 scene.pendingDragTarget = target
             }
             .onEnded { value in
-                if let sourceID = scene.connectionSourceID {
-                    let candidate = scene.tendrilCandidateID
-                    scene.connectionSourceID = nil
-                    scene.tendrilCandidateID = nil
+                if let source = scene.connectionSource,
+                   let root = sculptureRoot(from: value.entity) {
+                    // Resolver de nuevo al soltar: el último onChanged puede
+                    // haber llegado antes de que la mano alcanzara el destino.
+                    let drop = state.clampedPosition(value.convert(value.location3D, from: .local, to: root))
+                    let candidate = connectionTarget(at: drop, excluding: source, in: root)
                     scene.noteDragEnded(at: CACurrentMediaTime())
                     clearTendril()
 
-                    guard let targetID = candidate else {
-                        state.statusMessage = "Suelta el hilo sobre otro organismo para conectarlo."
+                    guard let candidate else {
+                        if source == .play, simd_distance(drop, CompositionState.playNodePosition) > 0.45 {
+                            if state.playEntryNodeID == nil {
+                                state.createNextNode(at: drop)
+                            } else {
+                                state.statusMessage = "Play ya tiene una entrada. Corta su conexión antes de elegir otra."
+                            }
+                        } else {
+                            state.statusMessage = "Suelta el hilo sobre otro organismo o sobre Play libre."
+                        }
                         return
                     }
-                    // Nunca dejes el gesto sin respuesta: soltar sobre un
-                    // destino ya conectado debe decirlo, no quedarse callado.
-                    if !state.connect(sourceID: sourceID, destinationID: targetID) {
-                        state.statusMessage = "Esos organismos ya estaban conectados."
-                    }
+                    state.connectByDragging(from: source, to: candidate)
                 } else if let id = NodeEntityFactory.id(from: value.entity) {
                     // Confirma la posición final aunque el acelerador se la
                     // hubiera saltado.
@@ -243,20 +265,6 @@ struct SoundSculptureView: View {
                     scene.dragOrigins[id] = nil
                     scene.dragReferences[id] = nil
                     scene.pendingDragTarget = nil
-                } else if TransportNodeFactory.isTransportEntity(value.entity),
-                          let root = sculptureRoot(from: value.entity) {
-                    // Extraer un organismo exige un tirón deliberado. Antes
-                    // bastaban los 8 puntos mínimos del gesto, así que rozar el
-                    // núcleo al intentar cualquier otra cosa hacía brotar
-                    // organismos que nadie había pedido.
-                    let drop = value.convert(value.location3D, from: .local, to: root)
-                    if simd_distance(drop, CompositionState.playNodePosition) > 0.45 {
-                        if state.playEntryNodeID == nil {
-                            state.createNextNode(at: drop)
-                        } else {
-                            state.statusMessage = "Play ya tiene su única salida. Añade otro sonido y conéctalo entre organismos."
-                        }
-                    }
                 }
             }
     }
@@ -277,6 +285,23 @@ struct SoundSculptureView: View {
     /// Radio de enganche del hilo. Generoso a propósito: acertar a un objeto
     /// pequeño a un metro con la mano cansa.
     private var connectionSnapRadius: Float { 0.42 }
+
+    private func connectionTarget(at point: SIMD3<Float>, excluding source: ConnectionEndpoint, in root: Entity) -> ConnectionEndpoint? {
+        var candidates: [(ConnectionEndpoint, Float)] = []
+        if source != .play {
+            candidates.append((.play, simd_distance(point, CompositionState.playNodePosition)))
+        }
+        for node in state.nodes where source != .node(node.id) {
+            guard let entity = scene.entity(for: node.id, in: root) else { continue }
+            // Usar la posición visible incluye escala, giro y altura de cada
+            // timbre. Tanto el cuerpo como su conector sirven como destino.
+            let bodyDistance = simd_distance(point, entity.position(relativeTo: root))
+            let connectorDistance = entity.findEntity(named: NodeEntityFactory.connectorName)
+                .map { simd_distance(point, $0.position(relativeTo: root)) } ?? bodyDistance
+            candidates.append((.node(node.id), min(bodyDistance, connectorDistance)))
+        }
+        return candidates.filter { $0.1 <= connectionSnapRadius }.min { $0.1 < $1.1 }?.0
+    }
 
     private var rotationGesture: some Gesture {
         RotateGesture3D()
@@ -313,6 +338,7 @@ struct SoundSculptureView: View {
         root.addChild(TransportNodeFactory.make())
         state.nodes.forEach { root.addChild(NodeEntityFactory.makeNode($0)) }
         root.components.set(SceneMembershipRevisionComponent(value: state.sceneContentRevision))
+        scene.adopt(root: root)
         Task { await ParticleEffectSystem.prepareAssets(in: root) }
         return root
     }
@@ -367,9 +393,9 @@ struct SoundSculptureView: View {
                 node: node,
                 // El candidato a destino se ilumina como si estuviera
                 // seleccionado: dice "suelta aquí" sin necesidad de texto.
-                isSelected: state.selectedNodeID == node.id || scene.tendrilCandidateID == node.id,
+                isSelected: state.selectedNodeID == node.id || scene.tendrilCandidate == .node(node.id),
                 isTriggered: sounding.contains(node.id),
-                isConnectionSource: scene.connectionSourceID == node.id
+                isConnectionSource: scene.connectionSource == .node(node.id)
             )
             // Un nodo en pleno arrastre manda sobre el estado: su posición la
             // escribe el gesto a frame rate y el estado va detrás.
@@ -395,13 +421,14 @@ struct SoundSculptureView: View {
     /// Hilo que sigue la mano mientras se traza una conexión. Se dibuja desde el
     /// gesto, no desde el ciclo de actualización, para responder a frame rate.
     private func updateTendril(
-        from source: SoundNode,
+        from source: ConnectionEndpoint,
         to endPoint: SIMD3<Float>,
-        candidate: UUID?,
+        candidate: ConnectionEndpoint?,
         in root: Entity
     ) {
-        let previousCandidate = scene.tendrilCandidateID
-        scene.tendrilCandidateID = candidate
+        scene.tendrilCandidate = candidate
+        let sourceNode: SoundNode?
+        if case .node(let id) = source { sourceNode = state.node(id: id) } else { sourceNode = nil }
 
         let tendril: ModelEntity
         if let existing = scene.tendril {
@@ -409,57 +436,42 @@ struct SoundSculptureView: View {
         } else {
             tendril = ModelEntity(
                 mesh: .generateCylinder(height: 1, radius: 0.006),
-                materials: [SoundVisionMaterials.accentGlow(for: source.type, alpha: 0.85)]
+                materials: [SoundVisionMaterials.accentGlow(for: sourceNode?.type ?? .pad, alpha: 0.85)]
             )
             tendril.name = "connection-tendril"
             root.addChild(tendril)
             scene.tendril = tendril
         }
 
-        // Mismo desplazamiento vertical que aplica la animación al organismo,
-        // para que el hilo nazca del conector y no del aire.
-        let verticalOffset = NodeVisualStyle.style(for: source.type).verticalOffset
-        let from = SIMD3<Float>(
-            source.positionX,
-            source.positionY + verticalOffset - 0.34,
-            source.positionZ
-        )
+        let from = sourceNode.flatMap { scene.entity(for: $0.id, in: root) }?
+            .findEntity(named: NodeEntityFactory.connectorName)?.position(relativeTo: root)
+            ?? CompositionState.playNodePosition
         let length = SpatialSceneLayout.segmentLength(from: from, to: endPoint)
         tendril.position = (from + endPoint) / 2
         tendril.orientation = SpatialSceneLayout.segmentOrientation(from: from, to: endPoint)
         tendril.scale = [candidate == nil ? 1 : 1.9, length, candidate == nil ? 1 : 1.9]
 
-        // Ilumina el destino candidato en cuanto cambia, sin esperar a SwiftUI.
-        if previousCandidate != candidate {
-            for id in [previousCandidate, candidate].compactMap({ $0 }) {
-                guard let entity = scene.nodeEntities[id],
-                      var component = entity.components[SoundNodeVisualComponent.self]
-                else { continue }
-                component.isSelected = state.selectedNodeID == id || candidate == id
-                if entity.components[SoundNodeVisualComponent.self] != component {
-                    entity.components.set(component)
-                }
-            }
-        }
-
-        if let entity = scene.nodeEntities[source.id],
-           var component = entity.components[SoundNodeVisualComponent.self],
-           !component.isConnectionSource {
-            component.isConnectionSource = true
+        for (id, entity) in scene.nodeEntities {
+            guard var component = entity.components[SoundNodeVisualComponent.self] else { continue }
+            component.isSelected = state.selectedNodeID == id || candidate == .node(id)
+            component.isConnectionSource = source == .node(id)
             if entity.components[SoundNodeVisualComponent.self] != component {
                 entity.components.set(component)
             }
         }
+        scene.transport?.findEntity(named: "play-glyph")?.scale = SIMD3(repeating: candidate == .play ? 1.4 : 1)
     }
 
     private func clearTendril() {
+        scene.connectionSource = nil
+        scene.tendrilCandidate = nil
         scene.tendril?.removeFromParent()
         scene.tendril = nil
-        for (_, entity) in scene.nodeEntities {
-            guard var component = entity.components[SoundNodeVisualComponent.self],
-                  component.isConnectionSource
-            else { continue }
+        scene.transport?.findEntity(named: "play-glyph")?.scale = .one
+        for (id, entity) in scene.nodeEntities {
+            guard var component = entity.components[SoundNodeVisualComponent.self] else { continue }
             component.isConnectionSource = false
+            component.isSelected = state.selectedNodeID == id
             if entity.components[SoundNodeVisualComponent.self] != component {
                 entity.components.set(component)
             }
@@ -479,8 +491,8 @@ private final class SculptureBridge {
 
     var dragOrigins: [UUID: SIMD3<Float>] = [:]
     var rotationOrigins: [UUID: SIMD3<Float>] = [:]
-    var connectionSourceID: UUID?
-    var tendrilCandidateID: UUID?
+    var connectionSource: ConnectionEndpoint?
+    var tendrilCandidate: ConnectionEndpoint?
     var tendril: ModelEntity?
     var soundingIDs: Set<UUID> = []
     var pendingDragTarget: SIMD3<Float>?

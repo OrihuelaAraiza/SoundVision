@@ -28,6 +28,7 @@ final class AudioEngineManager: ObservableObject {
         /// que ese organismo se quede sin agenda solo porque sus compañeros ya
         /// la recibieron.
         var publishedSessionID: UUID?
+        var health = VoiceRenderHealth()
     }
 
     /// Techo de fuentes espaciales simultáneas. Cada voz es una fuente de audio
@@ -43,8 +44,8 @@ final class AudioEngineManager: ObservableObject {
     private var expectedVoiceCount = 0
     private var requestedVoiceCount = 0
     private var attachFailure: String?
-    private var lastBlockCount = 0
-    private var isStalled = false
+    private var scheduledVoiceIDs: Set<UUID> = []
+    private var voiceNames: [UUID: String] = [:]
 
     /// Prepara la salida del sistema. Idempotente y barata.
     @discardableResult
@@ -77,6 +78,7 @@ final class AudioEngineManager: ObservableObject {
     ) {
         requestedVoiceCount = nodes.count
         expectedVoiceCount = min(nodes.count, Self.maximumVoices)
+        voiceNames = Dictionary(nodes.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         guard !nodes.isEmpty else {
             attachFailure = nil
             return
@@ -88,7 +90,9 @@ final class AudioEngineManager: ObservableObject {
 
         var firstFailure: String?
         for node in nodes.prefix(Self.maximumVoices) {
-            guard let entity = entityProvider(node.id) else { continue }
+            // addChild no garantiza que RealityKit ya haya activado la entidad.
+            // Una voz preparada antes de eso podía quedar enganchada sin rendir.
+            guard let entity = entityProvider(node.id), entity.isActive else { continue }
             // Una entidad reconstruida (deshacer, cargar, demo) deja la voz
             // apuntando al vacío: sin esto, el organismo volvía mudo para
             // siempre aunque siguiera en pantalla.
@@ -152,8 +156,8 @@ final class AudioEngineManager: ObservableObject {
         publishedStartSeconds = nil
         expectedVoiceCount = 0
         requestedVoiceCount = 0
-        lastBlockCount = 0
-        isStalled = false
+        scheduledVoiceIDs = []
+        voiceNames = [:]
         attachFailure = nil
     }
 
@@ -178,6 +182,7 @@ final class AudioEngineManager: ObservableObject {
             }
             publishedSessionID = nil
             publishedStartSeconds = nil
+            scheduledVoiceIDs = []
             return
         }
 
@@ -210,6 +215,7 @@ final class AudioEngineManager: ObservableObject {
         }
         let scheduledIDs = Set(session.nodes.map(\.id))
         let attacksByNode = session.attackTimesByNode(startSeconds: start)
+        scheduledVoiceIDs = Set(attacksByNode.keys).intersection(scheduledIDs)
 
         for nodeID in Array(voices.keys) {
             guard var voice = voices[nodeID] else { continue }
@@ -225,6 +231,10 @@ final class AudioEngineManager: ObservableObject {
                 loopStart: start,
                 repeatingEvery: session.loopDurationSeconds
             )
+            // Una agenda no arranca un controlador detenido por RealityKit.
+            // play() es idempotente: una rama que ya suena conserva su reloj.
+            voice.controller.play()
+            voice.health = VoiceRenderHealth()
             voice.publishedSessionID = session.id
             voices[nodeID] = voice
         }
@@ -259,6 +269,23 @@ final class AudioEngineManager: ObservableObject {
 
     // MARK: - Diagnóstico
 
+    /// Invocado desde el latido de la escena, incluso si SwiftUI no recibe más
+    /// cambios. Recupera solo la voz afectada y mantiene su agenda y el origen
+    /// común del loop; no reinicia las otras ramas.
+    func recoverStalledVoices() {
+        guard publishedSessionID != nil else { return }
+        let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+        for id in scheduledVoiceIDs {
+            guard var voice = voices[id], voice.entity?.isActive == true else { continue }
+            if voice.health.needsRestart(blocks: voice.renderer.renderedBlocks,
+                                         isPlaying: voice.controller.isPlaying, now: now) {
+                voice.controller.stop()
+                voice.controller.play()
+            }
+            voices[id] = voice
+        }
+    }
+
     /// Resumen legible del estado real del motor. Devuelve `nil` cuando todo va
     /// bien: solo habla si hay algo que explicar.
     var problemSummary: String? {
@@ -277,8 +304,10 @@ final class AudioEngineManager: ObservableObject {
         if voices.values.allSatisfy({ $0.renderer.renderedBlocks == 0 }) {
             return "Audio: las voces están enganchadas pero el sistema no les pide muestras."
         }
-        if isStalled {
-            return "Audio: el sistema dejó de pedir muestras en plena reproducción."
+        let stalledNames = scheduledVoiceIDs.filter { voices[$0]?.health.isStalled == true }
+            .compactMap { voiceNames[$0] }.sorted()
+        if !stalledNames.isEmpty {
+            return "Audio: sin respuesta en \(stalledNames.joined(separator: ", "))."
         }
         if publishedSessionID != nil, voices.values.allSatisfy({ !$0.renderer.didRenderAudibleSample }) {
             return "Audio: voces conectadas y activas, pero sin muestras audibles todavía."
@@ -294,10 +323,6 @@ final class AudioEngineManager: ObservableObject {
     /// completamente distinto de una voz que rinde silencio, y desde fuera los
     /// dos suenan igual de callados.
     func diagnosticsSummary() -> String {
-        let blocks = voices.values.reduce(0) { $0 + $1.renderer.renderedBlocks }
-        isStalled = publishedSessionID != nil && blocks > 0 && blocks == lastBlockCount
-        lastBlockCount = blocks
-
         guard let reference = voices.values.first else {
             return "Sin voces enganchadas · \(AudioOutputSession.routeDescription)"
         }

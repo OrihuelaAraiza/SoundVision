@@ -217,10 +217,15 @@ struct StudioConsoleView: View {
                     StudioCard(tint: .orange) {
                         Label("Este sonido aún no tiene ruta desde Play", systemImage: "arrow.triangle.branch").font(.callout)
                         if state.playEntryNodeID == nil {
-                            Button("Usar como entrada") { state.connectToPlay(id: node.id) }.buttonStyle(.bordered)
-                        } else {
-                            Text("Selecciona un sonido conectado y añade una salida hacia \(node.name).")
+                            Text("Usa Conectar a Play en las conexiones de abajo, o une el hilo con Play en el espacio.")
                                 .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Menu("Conectar desde…") {
+                                ForEach(state.nodes.filter { !state.unreachableNodeIDs().contains($0.id) }) { source in
+                                    Button(source.name) { _ = state.connect(sourceID: source.id, destinationID: node.id) }
+                                }
+                            }
+                            .buttonStyle(.bordered)
                         }
                     }
                 }

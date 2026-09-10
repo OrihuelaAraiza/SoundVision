@@ -17,6 +17,17 @@ struct ConnectionEditorView: View {
             Text("Cada salida cuenta desde este nodo. Mismo tiempo: juntas. Tiempos distintos: primero el menor.")
                 .font(.caption).foregroundStyle(.secondary)
 
+            if state.playEntryNodeID == nil {
+                Button { state.connectToPlay(id: node.id) } label: {
+                    Label("Conectar a Play", systemImage: "play.circle")
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                }
+                .buttonStyle(.borderedProminent)
+            } else if state.playEntryNodeID == node.id {
+                Label("Entrada de Play", systemImage: "play.circle.fill")
+                    .font(.callout).foregroundStyle(.cyan)
+            }
+
             let incoming = state.connections.filter { $0.destinationNodeID == node.id }
             if !incoming.isEmpty {
                 DisclosureGroup("Entradas · \(incoming.count)") {
