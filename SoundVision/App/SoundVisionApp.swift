@@ -18,7 +18,7 @@ struct SoundVisionApp: App {
             MainWindowView()
                 .environmentObject(compositionState)
         }
-        .defaultSize(width: 520, height: 760)
+        .defaultSize(width: 560, height: 800)
 
         ImmersiveSpace(id: ImmersiveSpaceID.soundLab) {
             SoundSculptureView()

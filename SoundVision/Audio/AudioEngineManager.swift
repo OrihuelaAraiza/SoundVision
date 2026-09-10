@@ -186,6 +186,10 @@ final class AudioEngineManager: ObservableObject {
             return
         }
         secondsPerBeat = session.secondsPerBeat
+        // Arrastrar/rotar solo cambia parámetros: no reagrupar 512 ataques en
+        // cada frame de UI si todas las voces ya tienen su agenda.
+        if publishedSessionID == session.id,
+           voices.values.allSatisfy({ $0.publishedSessionID == session.id }) { return }
 
         let isNewSession = session.id != publishedSessionID
         publishedSessionID = session.id
@@ -204,13 +208,13 @@ final class AudioEngineManager: ObservableObject {
         } else {
             start = publishedStartSeconds ?? now + 0.06
         }
-        let activeIDs = Set(session.nodes.filter(\.isActive).map(\.id))
+        let scheduledIDs = Set(session.nodes.map(\.id))
         let attacksByNode = session.attackTimesByNode(startSeconds: start)
 
         for nodeID in Array(voices.keys) {
             guard var voice = voices[nodeID] else { continue }
             guard isNewSession || voice.publishedSessionID != session.id else { continue }
-            guard activeIDs.contains(nodeID), let attacks = attacksByNode[nodeID] else {
+            guard scheduledIDs.contains(nodeID), let attacks = attacksByNode[nodeID] else {
                 voice.renderer.schedule.clear()
                 voice.publishedSessionID = session.id
                 voices[nodeID] = voice

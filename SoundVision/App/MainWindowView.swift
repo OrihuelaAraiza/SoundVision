@@ -24,96 +24,56 @@ struct MainWindowView: View {
 
     private var launcher: some View {
         ScrollView {
-        VStack(spacing: 22) {
-            Spacer()
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    Text("SOUNDVISION").font(.system(.callout, design: .rounded).weight(.heavy)).tracking(3)
+                    Spacer()
+                    Text("Surgery of Sound").font(.caption).foregroundStyle(.cyan)
+                }
+                StudioEmblem().frame(height: 170).frame(maxWidth: .infinity)
+                StudioHeading(eyebrow: "Música que puedes tocar", title: "Tu espacio. Tu sonido.",
+                              detail: "Construye música con las manos. Conecta ideas y transfórmalas mientras suenan.")
+                HStack(spacing: 18) {
+                    Label("24 timbres", systemImage: "waveform")
+                    Label("4 prácticas", systemImage: "graduationcap")
+                }.font(.caption).foregroundStyle(.secondary)
 
-            Image(systemName: "waveform.path.ecg.rectangle")
-                .font(.system(size: 64, weight: .thin))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(.cyan, .purple)
-
-            VStack(spacing: 8) {
-                Text("SOUNDVISION")
-                    .font(.system(size: 44, weight: .black, design: .rounded))
-                    .tracking(6)
-                    // Con el tracking, el título roza los 366 pt: si la ventana
-                    // se estrecha debe encoger, no recortarse.
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                Text("Surgery of Sound")
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(.cyan)
-                Text("Construye música conectando organismos sonoros en el espacio.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(spacing: 12) {
-                if !state.nodes.isEmpty {
-                    Button { Task { await start {} } } label: {
-                        Label("Continuar composición", systemImage: "arrow.uturn.forward")
-                            .frame(maxWidth: .infinity, minHeight: 32)
+                VStack(spacing: 12) {
+                    if !state.nodes.isEmpty {
+                        Button { Task { await start {} } } label: {
+                            Label("Continuar mi composición", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 38)
+                        }.buttonStyle(.borderedProminent).tint(StudioDesign.accent)
                     }
-                    .buttonStyle(.bordered)
-                }
-                Button {
-                    Task { await start { state.studioSection = .learn } }
-                } label: {
-                    Label("Aprender música", systemImage: "graduationcap")
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                }
-                .buttonStyle(.bordered)
-                Button {
-                    Task { await start { state.startNewComposition(); state.studioSection = .sounds } }
-                } label: {
-                    Label("Nueva pista", systemImage: "plus.rectangle.on.rectangle")
-                        .frame(maxWidth: .infinity, minHeight: 42)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.cyan)
+                    Button {
+                        Task { await start { state.startNewComposition(); state.studioSection = .sounds } }
+                    } label: {
+                        Label("Crear una composición", systemImage: "plus").frame(maxWidth: .infinity, minHeight: 38)
+                    }.buttonStyle(.borderedProminent).tint(state.nodes.isEmpty ? StudioDesign.accent : .purple)
 
-                Button {
-                    Task { await start { state.loadSpatialTestScene(); state.studioSection = .transport } }
-                } label: {
-                    Label("Abrir demo espacial", systemImage: "ear.and.waveform")
-                        .frame(maxWidth: .infinity, minHeight: 42)
+                    HStack(spacing: 12) {
+                        Button { Task { await start { state.studioSection = .learn } } } label: {
+                            Label("Aprender", systemImage: "graduationcap").frame(maxWidth: .infinity, minHeight: 34)
+                        }
+                        Button { Task { await start { state.loadSpatialTestScene(); state.studioSection = .transport } } } label: {
+                            Label("Explorar demo", systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 34)
+                        }
+                    }.buttonStyle(.bordered)
+                    Button { Task { await start { state.load(); state.studioSection = .transport } } } label: {
+                        Label("Abrir composición guardada", systemImage: "folder").frame(maxWidth: .infinity, minHeight: 28)
+                    }.buttonStyle(.borderless)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.purple)
-
-                Button {
-                    Task { await start { state.load(); state.studioSection = .transport } }
-                } label: {
-                    Label("Cargar composición guardada", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity, minHeight: 42)
+                .disabled(isTransitioning)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                if isTransitioning {
+                    ProgressView("Preparando tu espacio…").font(.caption)
+                } else if let message = state.statusMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.bordered)
-            }
-            .disabled(isTransitioning)
-            // "Cargar composición guardada" es la etiqueta más larga: dentro de
-            // 340 pt entra, pero que encoja antes que recortarse.
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .frame(maxWidth: 340)
-
-            if let message = state.statusMessage {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Spacer()
-
-            Text("Los controles aparecen en esta misma ventana al entrar al estudio.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+                Text("Sintetizado en tu dispositivo · Hecho para el espacio")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }.padding(32)
         }
-        .padding(32)
-        }
+        .background { StudioBackdrop() }
     }
 
     @MainActor

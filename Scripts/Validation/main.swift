@@ -134,7 +134,7 @@ MainActor.assumeIsolated {
     state.togglePlayback()
     check(state.graphTransport.isPlaying, "Play did not start")
     state.setConnectionBeats(id: edge.id, beats: 1)
-    check(!state.graphTransport.isPlaying && state.spatialAudioSession == nil, "Old schedule kept playing")
+    check(state.graphTransport.isPlaying && state.spatialAudioSession != nil && state.hasPendingTimingChanges, "Timing edit interrupted playback")
     state.startNewComposition()
     for _ in 0..<35 { state.createNode(of: .tom) }
     check(state.nodes.count == 32, "Voice limit not enforced")
@@ -144,3 +144,59 @@ MainActor.assumeIsolated {
 let lowBass = SoundNode(name: "Low", type: .bass, pitch: -24, positionX: 0, positionY: 1.25, positionZ: 0)
 check(SpatialParameterMapper.noteName(for: lowBass) == "La-1", "Incorrect bass register")
 print("PASS note register at lowest supported pitch")
+
+MainActor.assumeIsolated {
+    let state = CompositionState()
+    let a = state.createNode(of: .electricPiano, at: [0, 1.25, 0])
+    let b = state.createNode(of: .flute, at: [0.5, 1.25, 0])
+    state.connect(sourceID: a, destinationID: b)
+    state.togglePlayback()
+    let session = state.spatialAudioSession!
+    state.moveNode(id: a, to: [-0.6, 1.8, 0.5])
+    state.rotateNode(id: a, addingTo: .zero, delta: [.pi / 2, .pi / 3, .pi / 4])
+    state.setPitch(id: a, semitones: 7)
+    state.beginParameterEdit()
+    state.setSoundParameter(id: a, parameter: .volume, value: 0.4)
+    state.setSoundParameter(id: a, parameter: .delay, value: 0.7)
+    check(state.node(id: a)?.pitch == 7 && state.node(id: a)?.volume == 0.4 && state.node(id: a)?.delay == 0.7, "Live parameter lost")
+    check(state.node(id: a)?.isSoundLocked == false, "Pitch unexpectedly locked movement")
+    check(state.graphTransport.isPlaying && state.spatialAudioSession?.id == session.id, "Live editing stopped or restarted audio")
+    check(state.spatialAudioSession?.events == session.events && state.hasPendingTimingChanges, "Live gesture changed pulse")
+    state.undo()
+    check(state.graphTransport.isPlaying, "Undo stopped live editing")
+    state.createNode(of: .strings)
+    check(state.graphTransport.isPlaying && state.spatialAudioSession?.id == session.id, "Adding a free node interrupted audio")
+    state.stopPlayback()
+    state.togglePlayback()
+    check(state.spatialAudioSession?.events != session.events, "Next Play lost timing edits")
+    state.stopPlayback()
+    print("PASS live gestures and mixer: unchanged session, continuous transport, next-Play timing, undo")
+}
+
+// Desmutear un nodo inicialmente silencioso debe recuperar su misma agenda.
+var mutedNode = SoundNode(name: "Muted", type: .organ, isActive: false, positionX: 0, positionY: 1.25, positionZ: 0)
+let mutedVoice = SpatialVoiceRenderer(node: mutedNode, sustainSeconds: 1)
+let mutedStart = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+mutedVoice.schedule.publish([mutedStart], loopStart: mutedStart, repeatingEvery: 1)
+let originalGeneration = mutedVoice.schedule.snapshot().generation
+check(render(mutedVoice, at: mutedStart).allSatisfy { $0 == 0 }, "Muted startup leaked audio")
+mutedNode.isActive = true
+mutedVoice.parameters.update(from: mutedNode, heldSeconds: 1)
+var resumedPeak: Float = 0
+for block in 1..<40 {
+    resumedPeak = max(resumedPeak, render(mutedVoice, at: mutedStart + Double(block * 512) / 48_000).map(abs).max() ?? 0)
+}
+check(resumedPeak > 0.01 && mutedVoice.schedule.snapshot().generation == originalGeneration, "Unmute lost the original schedule")
+mutedNode.pitch = 12
+mutedNode.distortion = 0.5
+mutedNode.delay = 0.4
+mutedVoice.parameters.update(from: mutedNode, heldSeconds: 1)
+check(mutedVoice.parameters.snapshot().frequency == 440, "Pitch did not reach live audio")
+let changed = render(mutedVoice, at: mutedStart + Double(40 * 512) / 48_000)
+check(changed.allSatisfy(\.isFinite) && changed.contains { abs($0) > 0.001 }, "Live effects lost audio")
+mutedNode.isActive = false
+mutedVoice.parameters.update(from: mutedNode, heldSeconds: 1)
+var lastMuted: [Float] = []
+for block in 41..<65 { lastMuted = render(mutedVoice, at: mutedStart + Double(block * 512) / 48_000) }
+check(lastMuted.allSatisfy { abs($0) < 0.0001 }, "Mute did not fade to silence")
+print("PASS live renderer: initially muted, unmute, pitch/effects, mute fade without schedule replacement")

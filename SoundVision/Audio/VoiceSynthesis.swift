@@ -44,6 +44,11 @@ enum VoiceSynthesis {
         case .clap: 0.32
         case .tom: 0.55
         case .shaker: 0.16
+        case .rimshot: 0.12
+        case .cowbell: 0.42
+        case .conga: 0.48
+        case .woodblock: 0.17
+        case .openHat: 0.65
         default: 0.3
         }
     }
@@ -84,6 +89,31 @@ enum VoiceSynthesis {
             .init(isPercussive: false, fundamental: 220, attack: 0.025, decay: 0.08,
                   sustainLevel: 0.9, release: 0.16, cutoff: 5_000,
                   partials: [(1, 1), (2, 0.7), (3, 0.4), (4, 0.32), (8, 0.12)])
+        case .rimshot:
+            .init(isPercussive: true, fundamental: 400, attack: 0, decay: 0, sustainLevel: 0, release: 0, cutoff: 7_000, partials: [(1, 1)])
+        case .cowbell:
+            .init(isPercussive: true, fundamental: 540, attack: 0, decay: 0, sustainLevel: 0, release: 0, cutoff: 6_000, partials: [(1, 1)])
+        case .conga:
+            .init(isPercussive: true, fundamental: 165, attack: 0, decay: 0, sustainLevel: 0, release: 0, cutoff: 3_800, partials: [(1, 1)])
+        case .woodblock:
+            .init(isPercussive: true, fundamental: 880, attack: 0, decay: 0, sustainLevel: 0, release: 0, cutoff: 6_000, partials: [(1, 1)])
+        case .openHat:
+            .init(isPercussive: true, fundamental: 320, attack: 0, decay: 0, sustainLevel: 0, release: 0, cutoff: 9_000, partials: [(1, 1)])
+        case .electricPiano:
+            .init(isPercussive: false, fundamental: 220, attack: 0.004, decay: 0.55, sustainLevel: 0.22, release: 0.4, cutoff: 3_500,
+                  partials: [(1, 1), (2, 0.4), (3, 0.08), (7, 0.035)])
+        case .flute:
+            .init(isPercussive: false, fundamental: 440, attack: 0.085, decay: 0.15, sustainLevel: 0.86, release: 0.22, cutoff: 2_900,
+                  partials: [(1, 1), (2, 0.08), (3, 0.045)])
+        case .strings:
+            .init(isPercussive: false, fundamental: 220, attack: 0.22, decay: 0.3, sustainLevel: 0.78, release: 0.55, cutoff: 4_200,
+                  partials: [(1, 1), (2.003, 0.52), (3, 0.32), (4.007, 0.2), (5, 0.12), (6, 0.08)])
+        case .brass:
+            .init(isPercussive: false, fundamental: 220, attack: 0.05, decay: 0.22, sustainLevel: 0.7, release: 0.16, cutoff: 5_000,
+                  partials: [(1, 1), (2, 0.85), (3, 0.65), (4, 0.4), (5, 0.22), (6, 0.1)])
+        case .subBass:
+            .init(isPercussive: false, fundamental: 55, attack: 0.018, decay: 0.08, sustainLevel: 0.95, release: 0.18, cutoff: 400,
+                  partials: [(1, 1), (2, 0.06)])
         case .bass:
             .init(isPercussive: false, fundamental: 55, attack: 0.012, decay: 0.18,
                   sustainLevel: 0.75, release: 0.12, cutoff: 900,
@@ -234,7 +264,22 @@ enum VoiceSynthesis {
             let bright = noise(sample: index, seed: seed) - noise(sample: index - 1, seed: seed)
             let swell = min(localTime / 0.018, 1) * exp(-localTime / 0.04)
             value = bright * Float(swell) * 0.48
-        case .bass, .pad, .lead, .fx, .bell, .marimba, .pluck, .organ:
+        case .rimshot:
+            let body = sine(cycles: frequency * localTime) + 0.55 * sine(cycles: frequency * 2.3 * localTime)
+            value = (body * 0.65 + noise(sample: index, seed: seed) * 0.22) * Float(exp(-localTime / 0.018))
+        case .cowbell:
+            value = (sine(cycles: frequency * localTime) + 0.65 * sine(cycles: frequency * 1.48 * localTime))
+                * Float(exp(-localTime / 0.095)) * 0.5
+        case .conga:
+            let phase = frequency * (localTime + 0.009 * (1 - exp(-localTime / 0.02)))
+            value = (sine(cycles: phase) + 0.27 * sine(cycles: phase * 2.4)) * Float(exp(-localTime / 0.09)) * 0.7
+        case .woodblock:
+            value = (sine(cycles: frequency * localTime) + 0.4 * sine(cycles: frequency * 2.7 * localTime))
+                * Float(exp(-localTime / 0.027)) * 0.7
+        case .openHat:
+            let high = noise(sample: index, seed: seed) - noise(sample: index - 1, seed: seed)
+            value = high * 0.28 * Float(exp(-localTime / 0.15))
+        case .bass, .pad, .lead, .fx, .bell, .marimba, .pluck, .organ, .electricPiano, .flute, .strings, .brass, .subBass:
             return 0
         }
 

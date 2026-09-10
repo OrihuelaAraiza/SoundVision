@@ -89,6 +89,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     private var smoothedFrequency: Double
     private var smoothedDelay: Float = 0
     private var smoothedDrive: Float = 1
+    private var smoothedMuteGain: Float = 1
     private var silentFrames = 0
     private var lastGeneration: UInt64 = .max
 
@@ -131,6 +132,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
 
     init(node: SoundNode, sustainSeconds: TimeInterval? = nil) {
         type = node.type
+        smoothedMuteGain = node.isActive ? 1 : 0
         spec = VoiceSynthesis.spec(for: node.type)
         seed = VoiceSynthesis.seed(for: node.type)
 
@@ -207,6 +209,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             // hacia su destino muestra a muestra: así un cambio brusco de
             // altura se oye como un glissando corto y no como un clic.
             let live = parameters.snapshot()
+            if audioRenderedBlocks == 1 { smoothedMuteGain = live.isMuted ? 0 : 1 }
             let targetFrequency = live.frequency
             let targetDelay = live.isMuted ? 0 : live.delayAmount
             let targetDrive = 1 + live.distortionAmount * 8
@@ -218,7 +221,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
             // sido cortado por Detener entra aquí.
             let lower = playbackIndex(atOrAfter: blockStart - duration, in: plan)
             let upper = playbackIndex(atOrAfter: min(blockEnd, plan.stopTime), in: plan)
-            let hasNotes = lower < upper && !live.isMuted && blockStart < fadeEnd
+            let hasNotes = lower < upper && (!live.isMuted || smoothedMuteGain > 0.0001) && blockStart < fadeEnd
             let hasDelayTail = smoothedDelay > 0.001 && silentFrames < delayCapacity
 
             if !hasNotes && !hasDelayTail {
@@ -269,7 +272,8 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                     // compensación de ganancia evita que subir la distorsión se
                     // perciba solo como subir el volumen.
                     let shaped = VoiceSynthesis.softClip(wet, drive: smoothedDrive)
-                    let out = max(-0.85, min(shaped / (1 + (smoothedDrive - 1) * 0.35), 0.85))
+                    smoothedMuteGain += ((live.isMuted ? 0 : 1) - smoothedMuteGain) * 0.004
+                    let out = max(-0.85, min(shaped / (1 + (smoothedDrive - 1) * 0.35), 0.85)) * smoothedMuteGain
 
                     if out != 0 {
                         blockHadSignal = true

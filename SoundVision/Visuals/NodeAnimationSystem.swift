@@ -176,11 +176,11 @@ struct NodeAnimationSystem: System {
             * simd_quatf(angle: node.rotation.x, axis: [1, 0, 0])
             * simd_quatf(angle: node.rotation.z, axis: [0, 0, 1])
         let idleAngle: Float = switch node.type {
-        case .pad, .organ: Float(sin(time * 0.22)) * 0.06
-        case .lead, .bell, .pluck: Float(sin(time * 0.65)) * 0.045
+        case .pad, .organ, .strings, .brass: Float(sin(time * 0.22)) * 0.06
+        case .lead, .bell, .pluck, .flute, .electricPiano: Float(sin(time * 0.65)) * 0.045
         case .fx: Float(time * (node.isTriggered ? 0.7 : 0.12)).truncatingRemainder(dividingBy: .pi * 2)
-        case .kick, .bass, .tom: Float(sin(time * 0.7)) * 0.014
-        case .snare, .hiHat, .clap, .shaker, .marimba: 0
+        case .kick, .bass, .tom, .subBass, .conga: Float(sin(time * 0.7)) * 0.014
+        case .snare, .hiHat, .clap, .shaker, .marimba, .rimshot, .woodblock, .cowbell, .openHat: 0
         }
         root.orientation = userRotation * simd_quatf(angle: idleAngle, axis: [0.25, 1, 0.15])
 
@@ -198,7 +198,7 @@ struct NodeAnimationSystem: System {
             }
         case .hiHat:
             root.findEntity(named: "accent")?.position.y = node.isTriggered ? 0.012 : 0.035
-        case .pad, .lead, .fx, .kick, .bass, .tom, .shaker, .bell, .marimba, .pluck, .organ:
+        case .pad, .lead, .fx, .kick, .bass, .tom, .shaker, .bell, .marimba, .pluck, .organ, .rimshot, .cowbell, .conga, .woodblock, .openHat, .electricPiano, .flute, .strings, .brass, .subBass:
             break
         }
     }

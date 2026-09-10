@@ -2,6 +2,7 @@ import Foundation
 
 enum SoundNodeType: String, Codable, CaseIterable, Sendable {
     case kick, snare, hiHat, clap, bass, pad, lead, fx, tom, shaker, bell, marimba, pluck, organ
+    case rimshot, cowbell, conga, woodblock, openHat, electricPiano, flute, strings, brass, subBass
 
     static func displayName(for type: SoundNodeType) -> String {
         switch type {
@@ -19,6 +20,16 @@ enum SoundNodeType: String, Codable, CaseIterable, Sendable {
         case .marimba: "Marimba"
         case .pluck: "Pluck"
         case .organ: "Órgano"
+        case .rimshot: "Rimshot"
+        case .cowbell: "Cencerro"
+        case .conga: "Conga"
+        case .woodblock: "Woodblock"
+        case .openHat: "Hi-hat abierto"
+        case .electricPiano: "Piano eléctrico"
+        case .flute: "Flauta"
+        case .strings: "Cuerdas"
+        case .brass: "Metales"
+        case .subBass: "Sub bass"
         }
     }
 
@@ -38,6 +49,16 @@ enum SoundNodeType: String, Codable, CaseIterable, Sendable {
         case .marimba: "pianokeys"
         case .pluck: "waveform"
         case .organ: "music.note.list"
+        case .rimshot: "circle.lefthalf.filled"
+        case .cowbell: "bell"
+        case .conga: "circle.bottomhalf.filled"
+        case .woodblock: "square.stack.3d.up"
+        case .openHat: "sun.max"
+        case .electricPiano: "pianokeys"
+        case .flute: "wind"
+        case .strings: "waveform.path"
+        case .brass: "speaker.wave.2"
+        case .subBass: "waveform.path.ecg"
         }
     }
 }
@@ -52,6 +73,16 @@ extension SoundNodeType {
         case .kick, .snare, .hiHat, .clap, .tom, .shaker: .percussion
         case .bass, .lead, .bell, .marimba, .pluck: .melody
         case .pad, .fx, .organ: .texture
+        case .rimshot: .percussion
+        case .cowbell: .percussion
+        case .conga: .percussion
+        case .woodblock: .percussion
+        case .openHat: .percussion
+        case .electricPiano: .melody
+        case .flute: .melody
+        case .strings: .texture
+        case .brass: .melody
+        case .subBass: .melody
         }
     }
 
@@ -71,12 +102,23 @@ extension SoundNodeType {
         case .marimba: "Madera cálida"
         case .pluck: "Cuerda pulsada"
         case .organ: "Armónicos sostenidos"
+        case .rimshot: "Borde seco y preciso"
+        case .cowbell: "Metal rítmico"
+        case .conga: "Cuerpo cálido"
+        case .woodblock: "Madera corta"
+        case .openHat: "Aire y brillo largo"
+        case .electricPiano: "Teclas suaves y redondas"
+        case .flute: "Soplo dulce"
+        case .strings: "Capas cálidas"
+        case .brass: "Armónicos con presencia"
+        case .subBass: "Grave puro"
         }
     }
 }
 
 struct SoundNode: Identifiable, Codable, Equatable, Sendable {
     static let maximumCount = 32
+    var spatialLabel: String { name.count > 12 ? String(name.prefix(11)) + "…" : name }
     let id: UUID
     var name: String
     var type: SoundNodeType

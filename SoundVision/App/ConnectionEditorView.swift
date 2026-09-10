@@ -104,11 +104,18 @@ struct PlaybackOrderView: View {
     @EnvironmentObject private var state: CompositionState
     @Environment(\.dismiss) private var dismiss
     @State private var plan = GraphPlaybackPlan(events: [], isTruncated: false)
+    @State private var showsDraft = false
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
+                    if state.graphTransport.isPlaying {
+                        Picker("Recorrido", selection: $showsDraft) {
+                            Text("En reproducción").tag(false)
+                            Text("Próximo Play").tag(true)
+                        }.pickerStyle(.segmented)
+                    }
                     Text("Beat 0 es el inicio. Los sonidos con el mismo beat empiezan juntos. La vuelta se repite un beat después del último ataque, hasta pulsar Detener.")
                         .font(.callout).foregroundStyle(.secondary)
                     if plan.isTruncated {
@@ -132,7 +139,11 @@ struct PlaybackOrderView: View {
             .navigationTitle("Orden de reproducción")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { dismiss() } } }
         }
-        .task {
+        .task(id: showsDraft) {
+            if !showsDraft, state.graphTransport.isPlaying, let session = state.spatialAudioSession {
+                plan = GraphPlaybackPlan(events: session.events, isTruncated: false)
+                return
+            }
             plan = GraphSchedule.makePlan(nodes: state.nodes, connections: state.connections,
                                           loopPasses: state.graphTransport.loopPasses)
         }

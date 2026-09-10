@@ -69,13 +69,13 @@ enum ConnectionLineSystem {
             let length = SpatialSceneLayout.segmentLength(from: sourcePosition, to: destinationPosition)
             line.position = (sourcePosition + destinationPosition) / 2
             line.orientation = SpatialSceneLayout.segmentOrientation(from: sourcePosition, to: destinationPosition)
-            line.scale = [1, length, 1]
+            let thickness: Float = line.components[ConnectionLineComponent.self]?.isHighlighted == true ? 1.8 : 1
+            line.scale = [thickness, length, thickness]
             line.isEnabled = destination.isActive
-            line.components.set(ConnectionLineComponent(
-                destinationID: destination.id,
-                type: destination.type,
-                isHighlighted: false
-            ))
+            if line.components[ConnectionLineComponent.self] == nil {
+                line.components.set(ConnectionLineComponent(destinationID: destination.id,
+                    type: destination.type, isHighlighted: false))
+            }
             setHighlight(triggeredIDs.contains(destination.id), on: line)
         }
     }

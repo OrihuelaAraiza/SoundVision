@@ -41,7 +41,7 @@ struct MusicLearningView: View {
                         feedback = lesson.success
                     } else {
                         feedback = state.lessonHasPlayed
-                            ? "Todavía falta un ajuste. Revisa el reto y consulta el orden de reproducción en la pestaña Reproducir."
+                            ? "Todavía falta un ajuste. Revisa el reto y consulta el orden de reproducción en la pestaña Estudio."
                             : "Primero pulsa Reproducir para escuchar el ejercicio."
                     }
                 } label: {
@@ -66,7 +66,7 @@ struct MusicLearningView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             } else {
                 Label("APRENDER HACIENDO", systemImage: "graduationcap").font(.caption.bold()).foregroundStyle(.cyan)
-                Text("Escucha. Conecta. Comprende.").font(.title2.bold())
+                Text("Escucha. Conecta. Comprende.").font(.system(.title2, design: .rounded).bold())
                 Text("Cuatro prácticas breves para descubrir cómo funciona la música en tu espacio.")
                     .foregroundStyle(.secondary)
                 ProgressView(value: Double(completed.count), total: Double(MusicLesson.allCases.count)) {

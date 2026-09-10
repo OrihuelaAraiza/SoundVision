@@ -123,7 +123,7 @@ final class LearningAndRoutingTests: XCTestCase {
     }
 
     @MainActor
-    func testEditingConnectionsStopsTheOldSchedule() throws {
+    func testStructuralEditsStopButTimingEditsPreservePlayback() throws {
         let state = CompositionState()
         let a = state.createNode(of: .kick)
         let b = state.createNode(of: .bell)
@@ -134,9 +134,12 @@ final class LearningAndRoutingTests: XCTestCase {
         XCTAssertNil(state.spatialAudioSession)
         state.togglePlayback()
         let edge = try XCTUnwrap(state.connections.last)
+        let session = state.spatialAudioSession?.id
         state.setConnectionBeats(id: edge.id, beats: 2)
-        XCTAssertFalse(state.graphTransport.isPlaying)
-        XCTAssertNil(state.spatialAudioSession)
+        XCTAssertTrue(state.graphTransport.isPlaying)
+        XCTAssertEqual(state.spatialAudioSession?.id, session)
+        XCTAssertTrue(state.hasPendingTimingChanges)
+        state.stopPlayback()
     }
 
     func testNoteReadoutUsesTheInstrumentRegister() {

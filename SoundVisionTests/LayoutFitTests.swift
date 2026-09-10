@@ -104,7 +104,7 @@ final class LayoutFitTests: XCTestCase {
             // volumen de tres cifras.
             let text = String(
                 format: "%@   %+.0f st   %d%%",
-                SoundNodeType.displayName(for: type),
+                SoundNode(name: SoundNodeType.displayName(for: type), type: type, positionX: 0, positionY: 1.25, positionZ: 0).spatialLabel,
                 -24.0,
                 100
             )

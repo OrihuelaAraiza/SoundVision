@@ -2,6 +2,8 @@ import Combine
 import Foundation
 import simd
 
+enum SoundParameter { case volume, reverb, delay, distortion }
+
 enum StudioSection: Hashable { case transport, sounds, node, learn }
 
 @MainActor
@@ -17,6 +19,7 @@ final class CompositionState: ObservableObject {
     /// Ahora viajan por este callback directo a las entidades de la escena.
     private(set) var soundingNodeIDs: Set<UUID> = []
     var onSoundingChanged: ((Set<UUID>) -> Void)?
+    @Published private(set) var hasPendingTimingChanges = false
     @Published var studioSection: StudioSection = .transport
     @Published var selectedNodeID: UUID?
     @Published var statusMessage: String?
@@ -130,7 +133,15 @@ final class CompositionState: ObservableObject {
 
     func undo() {
         guard let entry = undoStack.popLast() else { return }
-        stopPlayback()
+        let sameNodes = nodes.count == entry.nodes.count && zip(nodes, entry.nodes).allSatisfy { $0.id == $1.id && $0.type == $1.type }
+        let sameEdges = connections.count == entry.connections.count && zip(connections, entry.connections).allSatisfy {
+            $0.id == $1.id && $0.sourceNodeID == $1.sourceNodeID && $0.destinationNodeID == $1.destinationNodeID
+        }
+        if !sameNodes || !sameEdges || sequencer.bpm != entry.bpm || graphTransport.loopPasses != entry.loopPasses {
+            stopPlayback()
+        } else if graphTransport.isPlaying && connections != entry.connections {
+            hasPendingTimingChanges = true
+        }
         sequencer.bpm = entry.bpm
         graphTransport.loopPasses = entry.loopPasses
         nodes = entry.nodes
@@ -143,7 +154,12 @@ final class CompositionState: ObservableObject {
     }
 
     func toggleSelectedNode() {
-        guard let id = selectedNodeID, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        guard let id = selectedNodeID else { return }
+        toggleNode(id: id)
+    }
+
+    func toggleNode(id: UUID) {
+        guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
         nodes[index].isActive.toggle()
     }
 
@@ -254,7 +270,6 @@ final class CompositionState: ObservableObject {
             statusMessage = "Límite de 32 sonidos alcanzado. Elimina uno para añadir otro."
             return selectedNodeID ?? nodes.last!.id
         }
-        stopPlayback()
         let finalPosition = clamped(position ?? freeSpawnPosition())
         recordUndo("Añadir \(SoundNodeType.displayName(for: type))")
         let name = uniqueName(for: type)
@@ -304,16 +319,17 @@ final class CompositionState: ObservableObject {
     func moveNode(id: UUID, to position: SIMD3<Float>) {
         guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
         let value = clamped(position)
-        nodes[index].positionX = value.x
-        nodes[index].positionY = value.y
-        nodes[index].positionZ = value.z
-
-        // Con el sonido fijo el organismo se recoloca sin desafinarse: es lo
-        // que permite ordenar el espacio sin rehacer la composición.
-        guard !nodes[index].isSoundLocked else { return }
-        nodes[index].pitch = SpatialParameterMapper.pitch(forHeight: value.y)
-        nodes[index].volume = SpatialParameterMapper.volume(forDepth: value.z)
-        recalculateConnections(touching: id)
+        var updated = nodes[index]
+        updated.positionX = value.x
+        updated.positionY = value.y
+        updated.positionZ = value.z
+        if !updated.isSoundLocked {
+            updated.pitch = SpatialParameterMapper.pitch(forHeight: value.y)
+            updated.volume = SpatialParameterMapper.volume(forDepth: value.z)
+        }
+        guard updated != nodes[index] else { return }
+        nodes[index] = updated
+        if !updated.isSoundLocked { recalculateConnections(touching: id) }
     }
 
     func toggleSoundLock(id: UUID) {
@@ -337,13 +353,15 @@ final class CompositionState: ObservableObject {
             safeAngle(origin.y + delta.y, fallback: origin.y),
             safeAngle(origin.z + delta.z, fallback: origin.z)
         )
-        nodes[index].rotationX = vector.x
-        nodes[index].rotationY = vector.y
-        nodes[index].rotationZ = vector.z
+        var updated = nodes[index]
+        updated.rotationX = vector.x
+        updated.rotationY = vector.y
+        updated.rotationZ = vector.z
         let effects = SpatialParameterMapper.effects(from: vector)
-        nodes[index].reverb = effects.reverb
-        nodes[index].delay = effects.delay
-        nodes[index].distortion = effects.distortion
+        updated.reverb = effects.reverb
+        updated.delay = effects.delay
+        updated.distortion = effects.distortion
+        if updated != nodes[index] { nodes[index] = updated }
     }
 
     func togglePlayback() {
@@ -479,6 +497,7 @@ final class CompositionState: ObservableObject {
     ]
 
     func stopPlayback() {
+        hasPendingTimingChanges = false
         graphTransport.stop()
         spatialAudioSession = nil
         previewClearTask?.cancel()
@@ -569,19 +588,39 @@ final class CompositionState: ObservableObject {
         onSoundingChanged?(soundingNodeIDs)
     }
 
-    private func recalculateAllConnections() {
-        for index in connections.indices { recalculateConnection(at: index) }
-        nodes.forEach { recalculateDurationSummary(for: $0.id) }
-    }
+    private func recalculateAllConnections() { updateConnectionTimings(touching: nil) }
 
-    private func recalculateConnections(touching nodeID: UUID) {
-        for index in connections.indices where connections[index].sourceNodeID == nodeID || connections[index].destinationNodeID == nodeID {
-            recalculateConnection(at: index)
+    private func recalculateConnections(touching nodeID: UUID) { updateConnectionTimings(touching: nodeID) }
+
+    /// Cada gesto publica como máximo una colección de conexiones y una de
+    /// resúmenes. Antes enviaba una invalidación de toda la UI por cada arista.
+    private func updateConnectionTimings(touching nodeID: UUID?) {
+        let byID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var updatedConnections = connections
+        var rhythmChanged = false
+        for index in updatedConnections.indices {
+            let edge = updatedConnections[index]
+            if let nodeID, edge.sourceNodeID != nodeID && edge.destinationNodeID != nodeID { continue }
+            guard edge.usesSpatialTiming,
+                  let destination = byID[edge.destinationNodeID], !destination.isSoundLocked,
+                  edge.sourceNodeID.flatMap({ byID[$0] })?.isSoundLocked != true else { continue }
+            let source = edge.sourceNodeID.flatMap { byID[$0] }
+            let origin = source.map { SIMD3<Float>($0.positionX, $0.positionY, $0.positionZ) } ?? Self.playNodePosition
+            let beats = SpatialParameterMapper.durationBeats(from: origin,
+                to: [destination.positionX, destination.positionY, destination.positionZ])
+            if abs(beats - edge.durationBeats) > 0.0001 {
+                updatedConnections[index].durationBeats = beats
+                if edge.sourceNodeID != nil { rhythmChanged = true }
+            }
         }
-        let affected = connections
-            .filter { $0.sourceNodeID == nodeID || $0.destinationNodeID == nodeID }
-            .map(\.destinationNodeID)
-        Set(affected).forEach(recalculateDurationSummary)
+        if updatedConnections != connections { connections = updatedConnections }
+        if rhythmChanged && graphTransport.isPlaying && !hasPendingTimingChanges { hasPendingTimingChanges = true }
+        let incoming = Dictionary(grouping: connections, by: \.destinationNodeID)
+        var updatedNodes = nodes
+        for index in updatedNodes.indices {
+            updatedNodes[index].durationBeats = incoming[updatedNodes[index].id]?.map(\.durationBeats).min() ?? 1
+        }
+        if updatedNodes != nodes { nodes = updatedNodes }
     }
 
     /// La duración nace de la distancia entre extremos, así que un extremo con
@@ -598,9 +637,8 @@ final class CompositionState: ObservableObject {
         guard let destination = position(of: connection.destinationNodeID) else { return }
         let beats = SpatialParameterMapper.durationBeats(from: source, to: destination)
         if abs(connections[index].durationBeats - beats) > 0.0001 {
-            if graphTransport.isPlaying {
-                stopPlayback()
-                statusMessage = "Ritmo actualizado por la distancia. Pulsa Reproducir para escuchar la nueva ruta."
+            if graphTransport.isPlaying && !hasPendingTimingChanges {
+                hasPendingTimingChanges = true
             }
             connections[index].durationBeats = beats
         }
@@ -617,17 +655,19 @@ final class CompositionState: ObservableObject {
         let value = max(0.0625, min(beats, 32))
         guard connections[index].usesSpatialTiming || connections[index].durationBeats != value else { return }
         recordUndo("Ajustar tiempo")
-        stopPlayback()
+        if graphTransport.isPlaying { hasPendingTimingChanges = true }
         connections[index].usesSpatialTiming = false
         connections[index].durationBeats = value
         recalculateDurationSummary(for: connections[index].destinationNodeID)
-        statusMessage = "Tiempo fijo: \(String(format: "%.2f", value)) beats. Pulsa Reproducir para escucharlo."
+        statusMessage = graphTransport.isPlaying
+            ? "Tiempo preparado: \(String(format: "%.2f", value)) beats para el próximo Play."
+            : "Tiempo fijo: \(String(format: "%.2f", value)) beats."
     }
 
     func useSpatialTiming(id: UUID) {
         guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
         recordUndo("Usar tiempo espacial")
-        stopPlayback()
+        if graphTransport.isPlaying { hasPendingTimingChanges = true }
         connections[index].usesSpatialTiming = true
         recalculateConnection(at: index)
         recalculateDurationSummary(for: connections[index].destinationNodeID)
@@ -638,7 +678,28 @@ final class CompositionState: ObservableObject {
         guard semitones.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
         recordUndo("Afinar sonido")
         nodes[index].pitch = max(-24, min(semitones.rounded(), 24))
-        nodes[index].isSoundLocked = true
+    }
+
+    /// Un solo punto de deshacer por arrastre de slider, no uno por muestra.
+    func beginParameterEdit() { recordUndo("Ajustar sonido") }
+
+    func setSoundParameter(id: UUID, parameter: SoundParameter, value: Float) {
+        guard value.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        let amount = max(0, min(value, 1))
+        var updated = nodes[index]
+        switch parameter {
+        case .volume: updated.volume = amount
+        case .reverb:
+            updated.reverb = amount
+            updated.rotationX = amount * .pi
+        case .delay:
+            updated.delay = amount
+            updated.rotationY = amount * .pi
+        case .distortion:
+            updated.distortion = amount
+            updated.rotationZ = amount * .pi
+        }
+        if updated != nodes[index] { nodes[index] = updated }
     }
 
     func beginLesson(_ lesson: MusicLesson) {

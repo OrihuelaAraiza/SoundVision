@@ -39,6 +39,26 @@ struct NodeVisualStyle {
             .init(color: .systemPink, baseScale: 0.98, triggerScale: 1.24, waveScale: 1.7, idleAmplitude: 0.02, idleSpeed: 1.1, verticalOffset: 0.08)
         case .organ:
             .init(color: .systemIndigo, baseScale: 1.08, triggerScale: 1.16, waveScale: 2, idleAmplitude: 0.03, idleSpeed: 0.4, verticalOffset: 0.04)
+        case .rimshot:
+            .init(color: .systemRed, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .cowbell:
+            .init(color: .systemOrange, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .conga:
+            .init(color: .systemBrown, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .woodblock:
+            .init(color: .systemYellow, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .openHat:
+            .init(color: .systemYellow, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .electricPiano:
+            .init(color: .systemTeal, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .flute:
+            .init(color: .systemMint, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .strings:
+            .init(color: .systemPink, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .brass:
+            .init(color: .systemOrange, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
+        case .subBass:
+            .init(color: .systemIndigo, baseScale: 1, triggerScale: 1.22, waveScale: 1.8, idleAmplitude: 0.018, idleSpeed: 0.7, verticalOffset: 0)
         case .fx:
             .init(color: UIColor(red: 0.65, green: 0.24, blue: 1, alpha: 1), baseScale: 1, triggerScale: 1.27, waveScale: 1.75, idleAmplitude: 0.035, idleSpeed: 1.8, verticalOffset: 0.06)
         }

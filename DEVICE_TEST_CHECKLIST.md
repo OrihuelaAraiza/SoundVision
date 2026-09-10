@@ -15,7 +15,7 @@
 
 ### 0. Consola por pestañas
 
-1. La consola tiene cuatro pestañas: **Reproducir**, **Sonidos**, **Nodo** y **Aprender**.
+1. La consola tiene cuatro pestañas: **Estudio**, **Sonidos**, **Nodo** y **Aprender**.
    Confirma que en cada una **todo cabe sin tener que desplazar**.
 2. Selecciona un organismo y ve a **Nodo**: debe mostrar su inspector. Sin
    selección, debe explicar cómo seleccionar uno en vez de quedarse en blanco.
@@ -219,3 +219,21 @@ La prueba es satisfactoria si:
       comprobar que la composición no se borra.
 - [ ] Evaluar lectura, scroll, alcance de controles y fluidez con 14 y 32 nodos;
       comprobar volumen mezclado, localización, oclusión y comodidad con el visor.
+
+
+## Regresión de edición en vivo · septiembre 2026
+
+- [ ] Reproducir una cadena conectada; mover un nodo arriba/abajo y cerca/lejos.
+      Deben cambiar tono y volumen sin detener ni reiniciar el loop.
+- [ ] Girar y usar los cuatro sliders de Nodo; oír reverb, delay, distorsión y
+      volumen mientras continúa la pista. Deshacer un ajuste sin cortar Play.
+- [ ] Iniciar con un nodo intermedio muteado; activarlo durante Play, volver a
+      mutearlo y comprobar que todos los destinos siguen su ritmo.
+- [ ] Cambiar una distancia o tiempo fijo; comparar En reproducción / Próximo
+      Play. Detener y reproducir: ahora deben aplicarse los nuevos tiempos.
+- [ ] Añadir un timbre durante Play: nace libre y el resto continúa sonando.
+- [ ] Escuchar los 10 timbres nuevos, guardar favoritos, filtrar y reiniciar para
+      verificar que los favoritos persisten. Revisar etiquetas largas en el espacio.
+- [ ] Revisar portada, biblioteca, mezclador y prácticas en una ventana pequeña,
+      con texto ampliado y con 24–32 nodos. Confirmar lectura, scroll y respuesta
+      de sliders/gestos; la compilación por sí sola no valida su fluidez.

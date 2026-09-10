@@ -151,12 +151,12 @@ enum NodeEntityFactory {
             let core = part("node-core", mesh: .generateSphere(radius: 0.14), material: surface)
             let lowRing = part("accent", mesh: .generateCylinder(height: 0.018, radius: 0.2), material: glow, position: [0, -0.13, 0])
             return [core, lowRing]
-        case .snare:
+        case .snare, .rimshot:
             let core = part("node-core", mesh: .generateBox(size: 0.22, cornerRadius: 0.045), material: surface)
             let left = part("accent", mesh: .generateBox(width: 0.028, height: 0.18, depth: 0.27, cornerRadius: 0.01), material: glow, position: [-0.145, 0, 0])
             let right = part("accent", mesh: .generateBox(width: 0.028, height: 0.18, depth: 0.27, cornerRadius: 0.01), material: glow, position: [0.145, 0, 0])
             return [core, left, right]
-        case .hiHat:
+        case .hiHat, .openHat:
             let lower = part("node-core", mesh: .generateCylinder(height: 0.018, radius: 0.17), material: surface, position: [0, -0.025, 0])
             let upper = part("accent", mesh: .generateCylinder(height: 0.012, radius: 0.14), material: glow, position: [0, 0.035, 0])
             return [lower, upper]
@@ -165,29 +165,29 @@ enum NodeEntityFactory {
             let right = part("node-core-secondary", mesh: .generateBox(width: 0.095, height: 0.2, depth: 0.055, cornerRadius: 0.018), material: surface, position: [0.072, 0, 0])
             let center = part("accent", mesh: .generateSphere(radius: 0.035), material: glow)
             return [left, right, center]
-        case .bass:
+        case .bass, .subBass:
             let core = part("node-core", mesh: .generateBox(width: 0.19, height: 0.3, depth: 0.19, cornerRadius: 0.035), material: surface)
             let heart = part("accent", mesh: .generateBox(width: 0.1, height: 0.2, depth: 0.205, cornerRadius: 0.02), material: glow)
             return [core, heart]
-        case .pad:
+        case .pad, .strings:
             let core = part("node-core", mesh: .generateSphere(radius: 0.17), material: surface)
             let atmosphere = part("accent", mesh: .generateSphere(radius: 0.22), material: SoundVisionMaterials.translucentAccent(for: type, alpha: 0.08))
             return [atmosphere, core]
-        case .lead:
+        case .lead, .flute:
             let crystal = part("node-core", mesh: .generateCone(height: 0.36, radius: 0.12), material: surface)
             let beam = part("accent", mesh: .generateCylinder(height: 0.44, radius: 0.012), material: glow)
             crystal.orientation = simd_quatf(angle: .pi, axis: [1, 0, 0])
             return [crystal, beam]
-        case .tom:
+        case .tom, .conga:
             return [part("node-core", mesh: .generateCylinder(height: 0.2, radius: 0.14), material: surface),
                     part("accent", mesh: .generateCylinder(height: 0.015, radius: 0.16), material: glow, position: [0, 0.11, 0])]
         case .shaker:
             return [part("node-core", mesh: .generateCylinder(height: 0.26, radius: 0.085), material: surface),
                     part("accent", mesh: .generateSphere(radius: 0.035), material: glow, position: [0, 0.2, 0])]
-        case .bell:
+        case .bell, .cowbell:
             return [part("node-core", mesh: .generateCone(height: 0.25, radius: 0.17), material: surface),
                     part("accent", mesh: .generateSphere(radius: 0.045), material: glow, position: [0, -0.14, 0])]
-        case .marimba:
+        case .marimba, .woodblock, .electricPiano:
             var bars: [ModelEntity] = []
             for index in -1...1 {
                 let depth: Float = 0.3 - Float(abs(index)) * 0.07
@@ -200,7 +200,7 @@ enum NodeEntityFactory {
         case .pluck:
             return [part("node-core", mesh: .generateSphere(radius: 0.12), material: surface),
                     part("accent", mesh: .generateCylinder(height: 0.4, radius: 0.012), material: glow)]
-        case .organ:
+        case .organ, .brass:
             var pipes: [ModelEntity] = []
             for index in -1...1 {
                 let height: Float = 0.34 - Float(abs(index)) * 0.08
@@ -253,7 +253,7 @@ enum NodeEntityFactory {
 
         let text = String(
             format: "%@   %+.0f st   %d%%",
-            node.name,
+            node.spatialLabel,
             node.pitch,
             Int(node.volume * 100)
         )

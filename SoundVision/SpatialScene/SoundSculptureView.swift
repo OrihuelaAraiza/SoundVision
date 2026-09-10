@@ -377,7 +377,9 @@ struct SoundSculptureView: View {
                let live = entity.components[SoundNodeVisualComponent.self] {
                 component.position = live.position
             }
-            entity.components.set(component)
+            if entity.components[SoundNodeVisualComponent.self] != component {
+                entity.components.set(component)
+            }
         }
     }
 
@@ -434,7 +436,9 @@ struct SoundSculptureView: View {
                       var component = entity.components[SoundNodeVisualComponent.self]
                 else { continue }
                 component.isSelected = state.selectedNodeID == id || candidate == id
-                entity.components.set(component)
+                if entity.components[SoundNodeVisualComponent.self] != component {
+                    entity.components.set(component)
+                }
             }
         }
 
@@ -442,7 +446,9 @@ struct SoundSculptureView: View {
            var component = entity.components[SoundNodeVisualComponent.self],
            !component.isConnectionSource {
             component.isConnectionSource = true
-            entity.components.set(component)
+            if entity.components[SoundNodeVisualComponent.self] != component {
+                entity.components.set(component)
+            }
         }
     }
 
@@ -454,7 +460,9 @@ struct SoundSculptureView: View {
                   component.isConnectionSource
             else { continue }
             component.isConnectionSource = false
-            entity.components.set(component)
+            if entity.components[SoundNodeVisualComponent.self] != component {
+                entity.components.set(component)
+            }
         }
     }
 }
@@ -526,7 +534,9 @@ private final class SculptureBridge {
                   var component = entity.components[SoundNodeVisualComponent.self]
             else { continue }
             component.isTriggered = ids.contains(id)
-            entity.components.set(component)
+            if entity.components[SoundNodeVisualComponent.self] != component {
+                entity.components.set(component)
+            }
         }
 
         if let transport, var component = transport.components[TransportVisualComponent.self] {

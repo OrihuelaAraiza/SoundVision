@@ -18,8 +18,8 @@ una composición musical en un grafo 3D interactivo.
   a partir de los propios timestamps del render.
 - RealityKit Spatial Audio por nodo: HRTF personalizado, seguimiento espacial,
   acústica ambiental y atenuación de distancia administrados por Apple.
-- Catorce timbres sintetizados localmente: Kick, Snare, Hi-hat, Clap, Bass, Pad, Lead, FX, Tom, Shaker, Campana, Marimba, Pluck y Órgano.
-- Catálogo con búsqueda y familias de percusión, melodía y texturas.
+- 24 timbres sintetizados localmente: Kick, Snare, Hi-hat, Clap, Bass, Pad, Lead, FX, Tom, Shaker, Campana, Marimba, Pluck, Órgano, Rimshot, Cencerro, Conga, Woodblock, Hi-hat abierto, Piano eléctrico, Flauta, Cuerdas, Metales y Sub bass.
+- Catálogo con búsqueda, favoritos locales y familias de percusión, melodía y texturas.
 - Aprendizaje musical con cuatro ejercicios comprobables y progreso local.
 - Guardado y carga de la composición como JSON local.
 - Pruebas unitarias para el patrón, timing, bifurcaciones, ciclos y persistencia.
@@ -121,7 +121,7 @@ La app también configura y activa explícitamente su `AVAudioSession`. No lo
 hacía, y la categoría por defecto es otra de las explicaciones clásicas de
 "pulso Play, veo la animación y no oigo nada" en hardware real.
 
-Cuando algo va mal, la pestaña **Reproducir** lo dice: cuántas voces hay
+Cuando algo va mal, la pestaña **Estudio** lo dice: cuántas voces hay
 enganchadas, de qué reloj se fían, a qué tasa rinden, qué pico están sacando y
 por qué salida. "No suena" tiene media docena de causas distintas y esa línea
 las separa sin tener que quitarse el visor.
@@ -185,7 +185,7 @@ avisa en naranja y pide unirlo desde una rama alcanzable. Solo cuando Play qued�
 sin entrada —por ejemplo, tras cortar esa conexión— permite convertir un
 organismo en la nueva entrada; nunca crea un segundo inicio.
 
-La consola tiene cuatro pestañas: **Reproducir**, **Sonidos**, **Nodo** y
+La consola tiene cuatro pestañas: **Estudio**, **Sonidos**, **Nodo** y
 **Aprender**. Reproducir/Detener y el estado permanecen al pie de todas ellas.
 El inspector permite elegir un nodo por nombre, editar entradas y salidas,
 afinar notas y desplegar los controles de posición y efectos cuando se necesitan.
@@ -226,13 +226,19 @@ Los tiempos fijos se guardan en JSON y permanecen iguales al mover los nodos.
 - Si esas rutas llegan en instantes distintos, el nodo vuelve a sonar en cada llegada.
 - Un nodo muteado mantiene el paso del pulso hacia sus destinos.
 - Los ciclos internos recorren cada arista como máximo las veces configuradas por camino.
-  El patrón completo sigue repitiéndose hasta Detener o una edición de estructura/tiempo.
+  El patrón completo sigue repitiéndose hasta Detener o una edición de conexiones/eliminación.
 
-**Reproducir → Ver orden de reproducción** muestra los ataques por beat, incluidos
+**Estudio → Ver orden de reproducción** muestra los ataques por beat, incluidos
 los nodos en silencio. El beat 0 es la entrada; una vuelta termina un beat después
-del último ataque. Cambiar estructura o tiempos detiene la agenda anterior:
-pulsa Reproducir para escuchar el nuevo recorrido. La afinación y el volumen se
-actualizan en vivo. Fija los sonidos y tiempos si solo quieres ordenar el espacio.
+del último ataque. La afinación, volumen, reverb, delay y distorsión cambian en
+vivo, también al mover o girar organismos. Añadir un nodo libre o deshacer un
+ajuste sonoro tampoco corta Play. Conectar o eliminar nodos sí detiene el recorrido.
+
+Los cambios de tiempo por distancia o por el menú se preparan para el próximo
+Play: el loop actual conserva sus ataques y reloj, mientras la duración sostenida
+del sonido responde al ajuste. El aviso inferior lo indica. La vista de orden
+permite comparar **En reproducción** y **Próximo Play**. Fija los sonidos y tiempos
+si solo quieres ordenar el espacio sin alterar la composición.
 
 La planificación usa una cola de prioridad y cuenta hasta 512 ataques únicos.
 También acota el trabajo de expansión del grafo. Si una composición supera esos
@@ -275,3 +281,43 @@ rendimiento del espacio inmersivo en Vision Pro.
 - Pendientes en Vision Pro: mezcla/HRTF real, gestos, comodidad y fluidez con
   escenas densas. La compilación conserva advertencias de aislamiento de actor
   de RealityKit bajo comprobación estricta de concurrencia; el proyecto usa Swift 5.
+
+
+## Edición en vivo e interfaz · 9 de septiembre de 2026
+
+En **Nodo** ahora hay un mezclador con afinación y sliders de volumen, reverb,
+delay y distorsión. Se pueden usar durante Play; el candado solo evita que la
+posición vuelva a mapear pitch/volumen/tiempo. Afinar manualmente ya no activa el
+candado por sorpresa. El mute conserva la agenda de la voz y aplica un fundido
+corto; desmutear recupera el sonido incluso si el nodo empezó inactivo.
+
+La ventana tiene una identidad compartida de superficies oscuras, cian y violeta,
+una portada espacial, tarjetas de timbres con ilustraciones de onda, favoritos,
+resumen de sesión y transporte fijo. El menú superior reúne guardar, cargar,
+demo y nueva composición. La preescucha aislada está disponible al detener la
+pista para evitar que un toque corte accidentalmente la mezcla.
+
+Se redujeron las publicaciones de estado durante movimiento/rotación, se agrupan
+las actualizaciones de conexiones y se omite reconstruir agendas y componentes
+visuales que no han cambiado. Las ondas de las tarjetas son ilustraciones estáticas,
+no medidores de audio ni animaciones ejecutándose mientras se hace scroll.
+
+`Scripts/validate-core.sh` incluye comprobaciones de los 24 renderizadores y
+regresiones de edición en vivo, mute/desmute, continuidad de sesión, deshacer y
+entrada de tiempos en el siguiente Play. La revisión de fluidez y espacialización
+con el visor sigue siendo una comprobación distinta de este arnés.
+
+Validación de esta revisión:
+- Compilación final para simulador (`build-for-testing`) y Vision Pro sin firma:
+  correctas con comprobación estricta de concurrencia.
+- El arnés ejecutado pasó para los 24 timbres, edición en vivo, mute/desmute,
+  continuidad del transporte, deshacer, añadir un nodo libre durante Play,
+  conexiones múltiples y las cuatro lecciones.
+- XCTest se interrumpió después de más de cinco minutos sin iniciar casos en
+  un simulador limpio de visionOS 26.5. El sistema mostró el entorno, pero no
+  respondió a Inicio. La instalación y el lanzamiento directo terminaron
+  correctamente tras una espera prolongada, pero no apareció la ventana de la
+  app y no fue posible revisar las pantallas.
+- No se considera ejecutado XCTest ni validada visualmente esta revisión. La
+  fluidez de los gestos, lectura de la interfaz y mezcla espacial deben probarse
+  en Vision Pro con `DEVICE_TEST_CHECKLIST.md`.
