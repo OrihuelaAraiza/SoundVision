@@ -419,7 +419,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     }
 
     /// Línea circular con dos tomas. El retardo se desliza con el parámetro, así
-    /// que girar el organismo mientras suena barre el eco en vez de saltarlo.
+    /// que subir el fader de delay mientras suena barre el eco en vez de saltarlo.
     @inline(__always)
     private func applyDelay(to dry: Float) -> Float {
         delayLine[delayWriteIndex] = dry

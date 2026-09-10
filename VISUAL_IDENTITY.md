@@ -11,9 +11,13 @@ definen el recorrido de reproducción y la geometría funciona como partitura.
 | Distancia horizontal entre nodos | Duración antes de continuar por el grafo |
 | Altura | Pitch, de grave a agudo |
 | Profundidad respecto al usuario | Volumen, de lejano a cercano |
-| Rotación X | Reverb |
-| Rotación Y | Delay |
-| Rotación Z | Distorsión |
+| Rotación X · Y · Z | Orientación del organismo; no altera el sonido |
+
+Reverb, delay y distorsión salieron de esta tabla a propósito. Un ángulo solo
+puede expresar una magnitud, así que los tres efectos se pisaban entre sí y
+colocar un cuerpo a gusto le cambiaba el sonido. Ahora cada efecto se ajusta en
+su fader —el pomo sube y baja con el valor— y se lee en su barra sobre el
+cuerpo, que solo aparece cuando ese efecto está en juego.
 
 Los rangos se centralizan en `SpatialParameterMapper`, de modo que puedan
 calibrarse después de probarlos físicamente sin modificar gestos ni audio.

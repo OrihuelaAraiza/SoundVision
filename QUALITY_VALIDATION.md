@@ -45,18 +45,33 @@ compila para el destino genérico Vision Pro sin firma. Ambas compilaciones usan
 Las herramientas de Xcode sí emiten avisos de metadatos App Intents no utilizados
 y bibliotecas XCTest ya firmadas.
 
+## XCTest ejecutado en visionOS Simulator
+
+Sí hay ejecución, y con resultado: **115 pruebas en visionOS 26.5 Simulator**
+(`-parallel-testing-enabled NO`; con clonado en paralelo la preparación del
+simulador tarda ~15 min antes del primer caso). Fallan **4 casos**, los mismos
+antes y después del cambio de indicadores de efecto —comprobado ejecutando la
+misma selección sobre un worktree en `HEAD`—, así que son deuda previa y no
+regresiones:
+
+| Caso | Qué mide | Por qué falla |
+|---|---|---|
+| `LayoutFitTests.testAxisTitlesFitTheirColumn` | Ancho de "Izquierda · Derecha" en la columna de 116 pt | Mide 112.26 pt y la prueba exige 109.04 (116 × 0.94) |
+| `LayoutFitTests.testSpatialReadoutFitsItsFrame` | Etiqueta 3D en su marco de 0.58 m | "Hi-hat abie…" y "Piano eléct…" miden 0.5885 m |
+| `MusicalMappingTests.testNotesEndSilentlyAndTonalOnesFadeIn` | Amplitud al inicio de la nota | 13–14 timbres superan el umbral de 0.05; el conjunto cambia entre ejecuciones, así que el umbral o la medida no son deterministas |
+| `QualityRegressionTests.testPlacementBoundsContainEveryAnimatedBody` | Cuerpo animado dentro de su radio de colocación | `tom: accent` llega a 0.40 con radio 0.36; `fx: node-core` y `fragment-3` llegan a 0.46 con radio 0.44 |
+
+Ninguno toca los faders, el indicador de efectos ni el gesto de precisión: esas
+nueve pruebas de `SpatialEffectGizmoTests` pasan, incluido el despeje del pomo
+frente al conector en los 24 timbres y en los dos extremos y el centro de su
+recorrido.
+
 ## Límites
 
-La compilación del paquete **no equivale a ejecución de XCTest**. El primer
-intento quedó detenido preparando recursos del simulador, que mostró pantalla
-negra. La revisión visual de la app y la interacción espacial no están aprobadas.
-Un segundo intento con `test-without-building` se interrumpió tras 120 segundos
-sin registrar casos ejecutados ni producir un paquete de resultados legible.
-
-Las pruebas `QualityRegressionTests` añaden comprobaciones de geometría RealityKit,
-ondas, conexiones silenciadas, reducción de movimiento, historial y recuperación.
-Su ejecución en un runtime operativo sigue pendiente, junto con los escenarios
-de hardware de `DEVICE_TEST_CHECKLIST.md`.
+La revisión visual de la app y la interacción espacial no están aprobadas: los
+cuatro casos anteriores siguen abiertos y los escenarios de hardware de
+`DEVICE_TEST_CHECKLIST.md` —incluida la lectura real de los faders y de las
+barras de efecto sobre el cuerpo— siguen pendientes de un Vision Pro físico.
 
 No se ha medido HRTF, mezcla final, ergonomía ni rendimiento con RealityKit Trace
 en un Vision Pro físico. Tampoco se ha firmado, instalado en hardware, publicado

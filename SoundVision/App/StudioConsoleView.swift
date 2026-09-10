@@ -394,10 +394,16 @@ struct SoundMixerControls: View {
             HStack {
                 Label(title, systemImage: icon).font(.caption)
                 Spacer()
-                Text("\(Int(value * 100)) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                // Redondear, no truncar: `Int(0.34 * 100)` en Float da 33, así
+                // que la consola enseñaba un porcentaje menos que el fader
+                // espacial sobre el mismo valor.
+                Text("\(Int((value * 100).rounded())) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
+            // Mismo paso de 1 % que el fader del nodo: los dos controles llegan
+            // exactamente a los mismos valores y muestran el mismo número.
             Slider(value: Binding(get: { value }, set: { state.setSoundParameter(id: node.id, parameter: parameter, value: $0) }),
-                   in: 0...1, onEditingChanged: { if $0 { state.beginParameterEdit("Ajustar \(title)") } else { state.endParameterEdit() } })
+                   in: 0...1, step: Float(SpatialEffectDrag.step),
+                   onEditingChanged: { if $0 { state.beginParameterEdit("Ajustar \(title)") } else { state.endParameterEdit() } })
                 .accessibilityLabel(title)
         }
     }

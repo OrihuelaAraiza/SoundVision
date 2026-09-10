@@ -33,11 +33,26 @@ final class SoundVisionTests: XCTestCase {
         XCTAssertGreaterThan(far, near)
     }
 
-    func testRotationMapsToIndependentEffects() {
-        let effects = SpatialParameterMapper.effects(from: [.pi / 2, .pi / 4, .pi])
-        XCTAssertEqual(effects.reverb, 0.5, accuracy: 0.001)
-        XCTAssertEqual(effects.delay, 0.25, accuracy: 0.001)
-        XCTAssertEqual(effects.distortion, 1, accuracy: 0.001)
+    /// Girar orienta el organismo y nada más. Cuando el ángulo *era* el valor
+    /// del efecto, colocar un cuerpo a gusto borraba su reverb y subir el
+    /// reverb lo dejaba tumbado; además dos efectos al 60 % dejaban el cuerpo
+    /// exactamente igual de torcido, así que el giro tampoco servía de lectura.
+    @MainActor
+    func testRotationAndEffectsStayIndependent() {
+        let state = CompositionState()
+        let id = state.createNode(of: .pad, at: [0, 1.25, 0])
+        state.setSoundParameter(id: id, parameter: .reverb, value: 0.8)
+        state.setSoundParameter(id: id, parameter: .delay, value: 0.35)
+        guard let tuned = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(tuned.rotationX, 0, "Subir un efecto no debe tumbar el organismo")
+        XCTAssertEqual(tuned.rotationY, 0)
+        XCTAssertEqual(tuned.rotationZ, 0)
+
+        state.rotateNode(id: id, addingTo: .zero, delta: [.pi / 2, .pi / 4, .pi])
+        guard let turned = state.node(id: id) else { return XCTFail("Nodo perdido") }
+        XCTAssertEqual(turned.reverb, 0.8, "Orientar el cuerpo no debe reescribir el sonido")
+        XCTAssertEqual(turned.delay, 0.35)
+        XCTAssertEqual(turned.distortion, 0)
     }
 
     func testGraphScheduleStartsBranchesAtTheSameBeat() {
@@ -164,16 +179,16 @@ final class SoundVisionTests: XCTestCase {
         let state = CompositionState()
         let id = state.createNode(of: .pad, at: [0, 1.25, 0])
 
+        state.setSoundParameter(id: id, parameter: .reverb, value: 0.42)
         state.rotateNode(id: id, addingTo: .zero, delta: [.pi / 2, 0, 0])
         guard let afterFirst = state.node(id: id) else { return XCTFail("Nodo perdido") }
         XCTAssertEqual(afterFirst.rotationX, .pi / 2, accuracy: 0.001)
-        XCTAssertEqual(afterFirst.reverb, 0.5, accuracy: 0.001)
 
         let origin = SIMD3<Float>(afterFirst.rotationX, afterFirst.rotationY, afterFirst.rotationZ)
         state.rotateNode(id: id, addingTo: origin, delta: [.pi / 4, 0, 0])
         guard let afterSecond = state.node(id: id) else { return XCTFail("Nodo perdido") }
         XCTAssertEqual(afterSecond.rotationX, .pi * 0.75, accuracy: 0.001)
-        XCTAssertEqual(afterSecond.reverb, 0.75, accuracy: 0.001)
+        XCTAssertEqual(afterSecond.reverb, 0.42, accuracy: 0.001, "Dos giros seguidos tampoco tocan el sonido")
     }
 
     /// Mover un nodo debe reescribir pitch y volumen desde su nueva posición.

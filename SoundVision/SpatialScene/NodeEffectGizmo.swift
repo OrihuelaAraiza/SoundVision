@@ -7,12 +7,19 @@ struct NodeEffectHandleComponent: Component {
 }
 
 /// Un único gizmo reutilizable para el nodo seleccionado. Es hermano de los
-/// organismos, de modo que sus diales no giran ni crecen al cambiar un efecto
+/// organismos, de modo que sus faders no giran ni crecen al cambiar un efecto
 /// o recibir un ataque. Solo los cuatro pomos tienen zonas de interacción.
 @MainActor
 final class NodeEffectGizmo {
     static let rootName = "node-effect-gizmo"
     static let handleRadius: Float = 0.065
+    /// Recorrido vertical del pomo. El pomo **es** el indicador: sube y baja
+    /// con el valor en vez de quedarse clavado en el centro de su control,
+    /// así el nivel de los cuatro efectos se lee de un vistazo y desde lejos.
+    static let trackHeight: Float = 0.18
+    /// El pomo se adelanta un poco sobre la pista para que la pinza lo agarre
+    /// a él y no al relleno que tiene detrás.
+    static let handleDepth: Float = 0.014
     static let parameters: [SoundParameter] = [.reverb, .delay, .distortion, .volume]
     let root = Entity()
     private(set) var nodeID: UUID?
@@ -23,7 +30,7 @@ final class NodeEffectGizmo {
 
     private struct Dial {
         let handle: ModelEntity
-        let ticks: [ModelEntity]
+        let fill: ModelEntity
         let digits: [ModelEntity]
         let lit: UnlitMaterial
         let dim: UnlitMaterial
@@ -44,19 +51,31 @@ final class NodeEffectGizmo {
         heading.name = "gizmo-heading"
         heading.position = [-0.38, 0.62, 0.12]
         root.addChild(heading)
-        let hint = ModelEntity(mesh: Self.textMesh("Pinza + arriba / abajo", size: 0.026, width: 0.64),
+        let hint = ModelEntity(mesh: Self.textMesh("Pinza y arrastra · lento afina", size: 0.026, width: 0.64),
                                materials: [UnlitMaterial(color: .white.withAlphaComponent(0.65))])
         hint.position = [-0.32, -0.63, 0.12]
         root.addChild(hint)
     }
 
-    /// Ni el cuerpo más grande ni el conector inferior invaden los pomos.
+    /// Ni el cuerpo más grande ni el conector inferior invaden los pomos, y
+    /// tampoco lo hacen con el pomo en el extremo bajo de su recorrido: los
+    /// centros están lo bastante lejos para que el fader entero quede libre.
     static func center(at index: Int) -> SIMD3<Float> {
         let positions: [SIMD3<Float>] = [
-            [-0.58, 0.42, 0.16], [0.58, 0.42, 0.16],
-            [0.58, -0.42, 0.16], [-0.58, -0.42, 0.16]
+            [-0.62, 0.52, 0.16], [0.62, 0.52, 0.16],
+            [0.62, -0.52, 0.16], [-0.62, -0.52, 0.16]
         ]
         return positions[index]
+    }
+
+    /// Altura del pomo y del relleno para un valor de 0 a 1.
+    static func place(handle: Entity, fill: Entity, at value: Float) {
+        let amount = max(0, min(value.isFinite ? value : 0, 1))
+        handle.position = [0, -trackHeight / 2 + amount * trackHeight, handleDepth]
+        // La barra crece desde abajo: se escala la misma malla en vez de
+        // generar una nueva por cada porcentaje.
+        fill.scale.y = max(amount, 0.0001)
+        fill.position = [0, -trackHeight / 2 + amount * trackHeight / 2, 0.002]
     }
 
     func synchronize(node: SoundNode?, position: SIMD3<Float>? = nil,
@@ -103,13 +122,13 @@ final class NodeEffectGizmo {
         if dial.handle.components[NodeEffectHandleComponent.self]?.nodeID != nodeID {
             dial.handle.components.set(NodeEffectHandleComponent(nodeID: nodeID, parameter: parameter))
         }
-        let percent = Int((max(0, min(value.isFinite ? value : 0, 1)) * 100).rounded())
+        let amount = max(0, min(value.isFinite ? value : 0, 1))
+        let percent = Int((amount * 100).rounded())
         if percent != dial.percent {
             dial.percent = percent
-            let count = Int((Double(percent) / 100 * Double(dial.ticks.count)).rounded())
-            for (index, tick) in dial.ticks.enumerated() {
-                tick.model?.materials = [index < count ? dial.lit : dial.dim]
-            }
+            // El pomo y la barra se mueven con el mismo número que enseñan los
+            // dígitos: apuntar, leer y oír coinciden al 1 %.
+            Self.place(handle: dial.handle, fill: dial.fill, at: Float(percent) / 100)
             // Reutilizar las mallas de los diez dígitos también mantiene el
             // porcentaje exacto al soltar, sin esperar a regenerar texto.
             for (index, digit) in dial.digits.enumerated() {
@@ -135,52 +154,55 @@ final class NodeEffectGizmo {
         group.name = "gizmo-dial-\(parameter.rawValue)"
         group.position = center
         root.addChild(group)
-        let color: UIColor = switch parameter {
-        case .reverb: .systemPurple
-        case .delay: .systemCyan
-        case .distortion: .systemOrange
-        case .volume: .systemMint
-        }
+        let color = EffectIndicatorStyle.color(for: parameter)
         let lit = UnlitMaterial(color: color)
         let dim = UnlitMaterial(color: color.withAlphaComponent(0.18))
+        // Pista, relleno y pomo comparten eje: donde apuntas es donde lees.
+        let track = ModelEntity(mesh: .generateBox(width: 0.017, height: Self.trackHeight, depth: 0.005),
+                                materials: [dim])
+        track.name = "gizmo-track-\(parameter.rawValue)"
+        group.addChild(track)
+        let fill = ModelEntity(mesh: .generateBox(width: 0.017, height: Self.trackHeight, depth: 0.006),
+                               materials: [lit])
+        fill.name = "gizmo-fill-\(parameter.rawValue)"
+        group.addChild(fill)
+        // Graduaciones fijas cada 25 %: dan una referencia estable contra la
+        // que juzgar la altura del pomo sin tener que leer el número.
+        for step in 0...4 {
+            let mark = ModelEntity(mesh: .generateBox(width: 0.013, height: 0.003, depth: 0.003), materials: [dim])
+            mark.position = [-0.023, -Self.trackHeight / 2 + Float(step) / 4 * Self.trackHeight, 0]
+            group.addChild(mark)
+        }
         let handle = ModelEntity(mesh: .generateSphere(radius: 0.036), materials: [lit])
         handle.name = "gizmo-handle-\(parameter.rawValue)"
         handle.components.set(InputTargetComponent())
         handle.components.set(HoverEffectComponent(.highlight(.init(color: color, strength: 0.9))))
         handle.components.set(CollisionComponent(shapes: [.generateSphere(radius: Self.handleRadius)]))
         group.addChild(handle)
-        // Trazo discontinuo de 270 grados: el arco lleno expresa el valor.
-        let ticks = (0..<24).map { index in
-            let angle = Float.pi * (1.25 - Float(index) / 23 * 1.5)
-            let tick = ModelEntity(mesh: .generateBox(width: 0.005, height: 0.016, depth: 0.003), materials: [dim])
-            tick.position = [cos(angle) * 0.09, sin(angle) * 0.09, 0]
-            tick.orientation = simd_quatf(angle: angle - .pi / 2, axis: [0, 0, 1])
-            group.addChild(tick)
-            return tick
-        }
+        Self.place(handle: handle, fill: fill, at: 0)
         let title = ModelEntity(mesh: Self.textMesh(parameter.title, size: 0.03, width: 0.27), materials: [lit])
-        title.position = [-0.135, 0.125, 0]
+        title.position = [-0.135, 0.15, 0]
         group.addChild(title)
         let digits = (0..<3).map { index in
             let cell = ModelEntity(mesh: digitMeshes[0], materials: [UnlitMaterial(color: .white)])
-            cell.position = [-0.065 + Float(index) * 0.023, -0.15, 0]
+            cell.position = [-0.065 + Float(index) * 0.023, -0.2, 0]
             group.addChild(cell)
             return cell
         }
         let percent = ModelEntity(mesh: Self.textMesh("%", size: 0.03, width: 0.05),
                                   materials: [UnlitMaterial(color: .white.withAlphaComponent(0.65))])
-        percent.position = [0.012, -0.15, 0]
+        percent.position = [0.012, -0.2, 0]
         group.addChild(percent)
-        // Une visualmente el dial con el nodo sin añadir otra zona de captura.
+        // Une visualmente el fader con el nodo sin añadir otra zona de captura.
         let direction = SIMD3<Float>(center.x, center.y, 0)
         let inner = simd_normalize(direction) * 0.30
-        let outer = simd_normalize(direction) * (simd_length(direction) - 0.115)
+        let outer = simd_normalize(direction) * (simd_length(direction) - 0.17)
         let line = ModelEntity(mesh: .generateCylinder(height: 1, radius: 0.002), materials: [dim])
         line.position = (inner + outer) / 2 + [0, 0, center.z]
         line.orientation = SpatialSceneLayout.segmentOrientation(from: inner, to: outer)
         line.scale.y = simd_distance(inner, outer)
         root.addChild(line)
-        return Dial(handle: handle, ticks: ticks, digits: digits, lit: lit, dim: dim)
+        return Dial(handle: handle, fill: fill, digits: digits, lit: lit, dim: dim)
     }
 
     private static func textMesh(_ text: String, size: CGFloat, width: CGFloat) -> MeshResource {

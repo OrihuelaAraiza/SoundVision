@@ -60,18 +60,10 @@ enum SpatialParameterMapper {
         return Double(clamp(horizontal * 2, min: 0.25, max: 8))
     }
 
-    static func effects(from rotation: SIMD3<Float>) -> (reverb: Float, delay: Float, distortion: Float) {
-        (
-            normalizedAngle(rotation.x),
-            normalizedAngle(rotation.y),
-            normalizedAngle(rotation.z)
-        )
-    }
-
-    private static func normalizedAngle(_ angle: Float) -> Float {
-        guard angle.isFinite else { return 0 }
-        return clamp(abs(angle) / .pi, min: 0, max: 1)
-    }
+    // El giro ya no se traduce a reverb, delay ni distorsión. Un ángulo solo
+    // podía expresar una magnitud, así que los tres efectos se pisaban entre
+    // sí y orientar un organismo alteraba su sonido sin querer. Ahora cada
+    // efecto se ajusta en su fader y se lee en su barra.
 
     private static func clamp<T: Comparable>(_ value: T, min minimum: T, max maximum: T) -> T {
         Swift.max(minimum, Swift.min(value, maximum))

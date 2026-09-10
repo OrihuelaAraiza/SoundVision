@@ -49,9 +49,11 @@ final class LiveEditingTests: XCTestCase {
         let observation = state.$nodes.dropFirst().sink { snapshots.append($0) }
         state.rotateNode(id: id, addingTo: .zero, delta: [.pi / 2, .pi / 2, .pi / 2])
         XCTAssertEqual(snapshots.count, 1)
-        XCTAssertEqual(snapshots.first?.first?.reverb, 0.5)
-        XCTAssertEqual(snapshots.first?.first?.delay, 0.5)
-        XCTAssertEqual(snapshots.first?.first?.distortion, 0.5)
+        XCTAssertEqual(snapshots.first?.first?.rotationX ?? 0, .pi / 2, accuracy: 0.001)
+        XCTAssertEqual(snapshots.first?.first?.rotationZ ?? 0, .pi / 2, accuracy: 0.001)
+        XCTAssertEqual(snapshots.first?.first?.reverb, 0, "El giro publica orientación, no efectos")
+        XCTAssertEqual(snapshots.first?.first?.delay, 0)
+        XCTAssertEqual(snapshots.first?.first?.distortion, 0)
         withExtendedLifetime(observation) {}
     }
 

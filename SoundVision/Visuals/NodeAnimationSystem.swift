@@ -9,6 +9,10 @@ struct SoundNodeVisualComponent: Component, Equatable {
     var type: SoundNodeType
     var position: SIMD3<Float>
     var rotation: SIMD3<Float>
+    /// Reverb, delay y distorsión. Viajan en el componente para que las barras
+    /// del cuerpo se actualicen cuando el valor cambia de verdad, y no porque
+    /// alguien recorra la escena buscando qué ha cambiado.
+    var effects: SIMD3<Float>
     var isActive: Bool
     var isSelected: Bool
     var isTriggered: Bool
@@ -20,6 +24,7 @@ struct SoundNodeVisualComponent: Component, Equatable {
         type = node.type
         position = [node.positionX, node.positionY, node.positionZ]
         rotation = [node.rotationX, node.rotationY, node.rotationZ]
+        effects = [node.reverb, node.delay, node.distortion]
         isActive = node.isActive
         self.isSelected = isSelected
         self.isTriggered = isTriggered
@@ -48,6 +53,12 @@ private struct CoreRenderedStateComponent: Component, Equatable {
     var materialBand: Int
 }
 
+/// Último nivel dibujado en las barras de efecto, en porcentaje entero: por
+/// debajo de eso el indicador no cambiaría de aspecto y no vale la pena tocarlo.
+private struct NodeEffectRenderedComponent: Component, Equatable {
+    var levels: SIMD3<Int32>
+}
+
 /// Referencias a las piezas del organismo, resueltas una sola vez al crearlo.
 /// Buscarlas por nombre costaba siete recorridos recursivos del subárbol por
 /// nodo y por frame, y eso se notaba como tirones con varios organismos.
@@ -56,6 +67,8 @@ struct NodePartsComponent: Component {
     var halo: Entity?
     var connector: Entity?
     var soundLockPlinth: Entity?
+    var effectMeter: Entity?
+    var effectBars: [NodeEffectMeter.Bar] = []
 }
 
 /// Ondas vivas de un organismo. `-infinity` marca una ranura libre.
@@ -123,6 +136,7 @@ struct NodeAnimationSystem: System {
         let parts = entity.components[NodePartsComponent.self] ?? NodePartsComponent()
         updateWaves(in: entity, parts: parts, node: node, style: style, time: time)
         updatePersonality(in: entity, node: node, time: time)
+        updateEffectMeter(in: entity, parts: parts, node: node, scale: scale)
         ParticleEffectSystem.updateNode(
             in: entity,
             isSelected: node.isSelected,
@@ -147,6 +161,33 @@ struct NodeAnimationSystem: System {
         }
 
         parts.soundLockPlinth?.isEnabled = node.isSoundLocked
+    }
+
+    /// Las barras de efecto no heredan ni el giro ni el pulso del cuerpo: se
+    /// contrarresta la transformada del organismo para que se queden quietas y
+    /// de frente. Colgando del cuerpo sin más, orientar un Pad se llevaba las
+    /// barras a su espalda y un ataque las hacía saltar justo cuando había
+    /// algo que leer.
+    private static func updateEffectMeter(
+        in entity: Entity,
+        parts: NodePartsComponent,
+        node: SoundNodeVisualComponent,
+        scale: Float
+    ) {
+        guard let meter = parts.effectMeter else { return }
+        let safeScale = scale.isFinite && scale > 0.0001 ? scale : 1
+        let inverse = entity.orientation.inverse
+        meter.position = inverse.act(SIMD3<Float>(0, NodeEffectMeter.elevation, 0) / safeScale)
+        meter.scale = SIMD3(repeating: 1 / safeScale)
+
+        let levels = NodeEffectMeter.levels(
+            reverb: node.effects.x,
+            delay: node.effects.y,
+            distortion: node.effects.z
+        )
+        guard entity.components[NodeEffectRenderedComponent.self]?.levels != levels else { return }
+        NodeEffectMeter.update(bars: parts.effectBars, levels: levels)
+        entity.components.set(NodeEffectRenderedComponent(levels: levels))
     }
 
     /// La agenda entrega cada ataque por separado. Las ondas leen sus fechas,

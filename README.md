@@ -7,7 +7,8 @@ una composición musical en un grafo 3D interactivo.
 
 - Ventana SwiftUI y `ImmersiveSpace` mixto.
 - Núcleo Play con una única salida hacia el primer organismo sonoro.
-- Manipulación 3D: posición y rotación controlan pitch, volumen, duración y efectos.
+- Manipulación 3D: la posición controla pitch, volumen y duración; la rotación
+  orienta el organismo. Los efectos tienen sus propios faders y su indicador.
 - Conexiones dirigidas libres con bifurcaciones simultáneas: todas las salidas
   de un organismo conservan su propia voz y suenan en la misma vuelta.
 - Play repite el patrón completo de forma continua y sample-accurate hasta que
@@ -41,19 +42,44 @@ entre su zona de interacción y la consola al abrir el estudio.
 
 ### Efectos directamente en el nodo
 
-Toca un organismo para mostrar cuatro diales alrededor de él: **Reverb**
+Toca un organismo para mostrar cuatro faders alrededor de él: **Reverb**
 (violeta), **Delay** (cian), **Distorsión** (naranja) y **Volumen** (menta).
-Mantén una pinza en el pomo y arrastra arriba para aumentar o abajo para reducir;
-el arco y el porcentaje muestran el valor de 0 a 100 %. Agarrar un control
-conserva su valor inicial, y soltar confirma el ajuste exacto. Funciona durante
-Play y también con el sonido fijo; un solo **Deshacer** revierte cada arrastre.
+Mantén una pinza en el pomo y arrastra arriba para aumentar o abajo para
+reducir. **El pomo es el indicador**: recorre su pista con el valor y deja
+detrás una barra encendida, así que el nivel de los cuatro se lee de un vistazo
+y desde lejos, sin tener que leer el número. El porcentaje sigue debajo, con
+graduaciones cada 25 %. Agarrar un control conserva su valor inicial, y soltar
+confirma el ajuste exacto. Funciona durante Play y también con el sonido fijo;
+un solo **Deshacer** revierte cada arrastre.
+
+**El gesto tiene dos velocidades**, como la aceleración de un puntero: un
+movimiento lento avanza a un tercio de ritmo —unos 750 puntos para el rango
+entero, suficiente para clavar un 1 % con la mano en el aire— y un barrido
+rápido sigue cruzando de 0 a 100 % de una pasada. Lo que se publica cae siempre
+en un porcentaje entero, así que soltar aterriza sobre el número que enseña el
+fader y no sobre un 0.6374 invisible.
 
 Solo el nodo seleccionado muestra el gizmo. Toca de nuevo su cuerpo para
-ocultarlo, o selecciona otro para trasladar los controles. Los diales siguen
+ocultarlo, o selecciona otro para trasladar los controles. Los faders siguen
 la posición del nodo y miran hacia la persona, pero no heredan sus giros ni los
 pulsos de escala. El cuerpo conserva su gesto de movimiento y el punto inferior
 conserva su gesto de conexión. Los valores siguen sincronizados con el mezclador
 y se guardan en la composición mediante el guardado habitual.
+
+### El efecto se ve en el organismo, no en su postura
+
+Sobre cada cuerpo hay una barra por efecto —reverb, delay y distorsión, con los
+mismos colores del gizmo— que sube y baja con el valor y **solo aparece cuando
+ese efecto está en juego**: un organismo seco se ve limpio y encender un efecto
+hace aparecer su indicador. Se leen sin seleccionar el nodo ni abrir la consola,
+y no heredan ni el giro ni el pulso del cuerpo: se quedan quietas y de frente
+mientras el organismo respira o recibe un ataque.
+
+Antes ese dato se leía por la inclinación del cuerpo: subir un efecto tumbaba el
+modelo. Eso gastaba la orientación —que es del espacio— en un dato del sonido, y
+encima resultaba ambiguo, porque un 60 % de reverb y un 60 % de delay dejaban el
+organismo igual de torcido. Ahora girar orienta y nada más, así que colocar un
+cuerpo a gusto ya no borra un reverb ajustado al 1 %.
 
 Una versión anterior anclaba los paneles a la cabeza con `AnchorEntity(.head)`.
 Eso los volvía inusables —seguían el giro de la cabeza, así que nunca podías
@@ -113,7 +139,7 @@ la idea central del proyecto.
 | Vertical | **Nota.** La altura salta entre grados de una escala pentatónica menor, ~11 cm por nota. |
 | Adelante · atrás | **Volumen.** Acercar un organismo lo hace sonar más presente. |
 | Distancia horizontal entre dos organismos | **Duración.** El primero sostiene hasta que arranca el segundo. |
-| Rotación X · Y · Z | **Reverb · delay · distorsión.** |
+| Rotación X · Y · Z | **Orientación.** Coloca el organismo; no altera su sonido. Los efectos van en sus faders. |
 
 La afinación se cuantiza a propósito. Con semitonos continuos, un organismo podía
 quedar a +7.3 semitonos y la pieza entera sonaba microtonal por muy buena que
@@ -122,7 +148,7 @@ combinación suena bien junta, así que colocar organismos a ojo produce música
 
 **La síntesis es en tiempo real.** Mover un organismo mientras la música suena
 cambia su afinación al instante, deslizándose hasta la nueva nota en vez de
-saltar. Girarlo barre sus efectos en vivo. Una versión anterior horneaba cada
+saltar. Subir un fader barre su efecto en vivo. Una versión anterior horneaba cada
 nota entera al pulsar Play, lo que hacía imposible por construcción que la mano
 afectara a lo que ya estaba sonando: el sonido ya estaba escrito.
 
@@ -199,7 +225,7 @@ Todo lo que construye la música se hace con las manos, dentro del espacio:
 | Arrastrarlo con **sonido fijo** | Solo lo recoloca, sin tocar su sonido. |
 | **Tirar del punto luminoso de abajo** | **Traza un hilo. Suéltalo sobre otro organismo para conectarlos.** |
 | Pinch sobre una conexión | La corta. |
-| Girar con dos manos | Reverb, delay y distorsión. |
+| Girar con dos manos | Orienta el organismo. El sonido no cambia. |
 | Pinch sobre el núcleo Play | Reproduce o detiene. |
 | Tirar del núcleo Play | Extrae el primer organismo solo si Play aún no tiene entrada. |
 
@@ -269,7 +295,7 @@ Los tiempos fijos se guardan en JSON y permanecen iguales al mover los nodos.
 **Estudio → Ver orden de reproducción** muestra los ataques por beat, incluidos
 los nodos en silencio. El beat 0 es la entrada; una vuelta termina un beat después
 del último ataque. La afinación, volumen, reverb, delay y distorsión cambian en
-vivo, también al mover o girar organismos. Añadir un nodo libre o deshacer un
+vivo, también al mover organismos o subir sus faders. Añadir un nodo libre o deshacer un
 ajuste sonoro tampoco corta Play. Conectar o eliminar nodos sí detiene el recorrido.
 
 Los cambios de tiempo por distancia o por el menú se preparan para el próximo

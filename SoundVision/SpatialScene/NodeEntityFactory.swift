@@ -33,12 +33,16 @@ enum NodeEntityFactory {
         let halo = makeSelectionHalo(for: node.type)
         let connector = makeConnector(for: node.type)
         let plinth = makeSoundLockPlinth()
+        // Una barra por efecto sobre el cuerpo: reverb, delay y distorsión se
+        // ven sin seleccionar el organismo ni abrir la consola.
+        let meter = NodeEffectMeter.make()
 
         root.addChild(ParticleEffectSystem.makeNodeEmitter(for: node.type))
         root.addChild(halo)
         root.addChild(makeConnectorStem(for: node.type))
         root.addChild(connector)
         root.addChild(plinth)
+        root.addChild(meter.container)
         root.addChild(makeSpatialReadout(for: node))
         root.components.set(readoutState(for: node))
         // Resueltas aquí, no buscadas por nombre en cada frame.
@@ -46,7 +50,9 @@ enum NodeEntityFactory {
             waves: waves,
             halo: halo,
             connector: connector,
-            soundLockPlinth: plinth
+            soundLockPlinth: plinth,
+            effectMeter: meter.container,
+            effectBars: meter.bars
         ))
         return root
     }
@@ -247,7 +253,10 @@ enum NodeEntityFactory {
     private static func makeSpatialReadout(for node: SoundNode) -> Entity {
         let container = Entity()
         container.name = readoutName(for: node)
-        container.position = [-0.16, 0.27, 0.02]
+        // Por encima de las barras de efecto: la etiqueta solo sale con el
+        // organismo seleccionado, así que es ella la que cede el sitio de
+        // abajo al indicador, que está siempre.
+        container.position = [-0.16, 0.375, 0.02]
         // Solo el organismo seleccionado enseña su lectura; ocho etiquetas a la
         // vez llenaban el espacio de texto que nadie estaba leyendo.
         container.isEnabled = false

@@ -3,17 +3,27 @@
 ## Gizmo de efectos en los nodos
 
 - [ ] Seleccionar un nodo con pinch: aparecen Reverb, Delay, Distorsión y
-      Volumen, cada uno con nombre, color, arco de nivel y porcentaje.
+      Volumen, cada uno con nombre, color, pista con graduaciones y porcentaje.
 - [ ] Agarrar cada pomo sin desplazarlo: no debe saltar el valor. Arrastrar arriba
       aumenta y abajo reduce. Probar 0 %, 100 % y volver desde ambos extremos.
+- [ ] El pomo y su barra deben **recorrer la pista** con el valor, no quedarse
+      quietos: comprobar que los cuatro niveles se leen de lejos sin mirar el número.
+- [ ] Precisión: mover la mano muy despacio debe avanzar de 1 en 1 %, sin saltos
+      de tres o cuatro; un barrido rápido debe seguir cruzando todo el rango de
+      una pasada. Soltar siempre en un porcentaje entero.
 - [ ] Durante Play, variar cada efecto y escuchar el cambio sin reiniciar el
       patrón ni cambiar los otros efectos, la posición, afinación o conexiones.
 - [ ] Soltar entre dos porcentajes y comprobar que el mezclador y el gizmo
       coinciden. Un solo Deshacer debe recuperar el valor anterior al arrastre.
 - [ ] Cambiar un efecto desde el mezclador: su dial espacial se actualiza.
       Guardar/cargar y comprobar que ambos controles conservan el mismo valor.
-- [ ] Girar el organismo: los diales permanecen legibles y su valor se actualiza.
-      Mover el cuerpo: el gizmo lo acompaña. Tirar del conector: sigue creando hilos.
+- [ ] Girar el organismo: los faders permanecen legibles **y los valores no
+      cambian** —girar solo orienta—. Mover el cuerpo: el gizmo lo acompaña.
+      Tirar del conector: sigue creando hilos.
+- [ ] Barras sobre el cuerpo: aparecen al subir reverb, delay o distorsión, con
+      el color del efecto, y desaparecen al volver a 0 %. Deben quedarse quietas
+      y de frente mientras el organismo respira, gira o recibe un ataque, y no
+      taparse con la etiqueta de nota/volumen del nodo seleccionado.
 - [ ] Tocar de nuevo el cuerpo o seleccionar otro: desaparecen los controles del
       anterior. Borrar el nodo durante una edición no debe afectar a otro sonido.
 - [ ] Probar Pad, Lead y un nodo muteado, con el sonido fijo y con varias ramas
@@ -146,13 +156,17 @@ Registra: cuál fuente se localiza mejor y si alguna parece estar dentro de la c
 
 Registra: rango cómodo, cambios demasiado bruscos y límites difíciles de alcanzar.
 
-### 4. Rotación y efectos
+### 4. Efectos y orientación
 
-1. Rota `Pad alto y lejano` alrededor de X para probar reverb.
-2. Rota `FX posterior` alrededor de Y/Z para delay y distorsión.
-3. Observa el porcentaje en el inspector y escucha el nodo individualmente.
+1. Selecciona `Pad alto y lejano` y sube su fader de reverb.
+2. Selecciona `FX posterior` y sube delay y distorsión.
+3. Observa el porcentaje en el inspector, la barra sobre el cuerpo y escucha el
+   nodo individualmente.
+4. Gira los dos organismos con dos manos: deben orientarse sin que su sonido ni
+   sus barras se muevan.
 
-Registra: control, latencia, efecto mínimo útil y punto donde pierde claridad.
+Registra: control, latencia, efecto mínimo útil, punto donde pierde claridad y
+si el 1 % es alcanzable con la mano en el aire.
 
 ### 5. Composición e interacción
 
@@ -268,8 +282,9 @@ La prueba es satisfactoria si:
 
 - [ ] Reproducir una cadena conectada; mover un nodo arriba/abajo y cerca/lejos.
       Deben cambiar tono y volumen sin detener ni reiniciar el loop.
-- [ ] Girar y usar los cuatro sliders de Nodo; oír reverb, delay, distorsión y
-      volumen mientras continúa la pista. Deshacer un ajuste sin cortar Play.
+- [ ] Usar los cuatro sliders de Nodo y los cuatro faders espaciales; oír reverb,
+      delay, distorsión y volumen mientras continúa la pista. Deshacer un ajuste
+      sin cortar Play. Girar el cuerpo no debe alterar ninguno de los cuatro.
 - [ ] Iniciar con un nodo intermedio muteado; activarlo durante Play, volver a
       mutearlo y comprobar que todos los destinos siguen su ritmo.
 - [ ] Cambiar una distancia o tiempo fijo; comparar En reproducción / Próximo
@@ -285,13 +300,15 @@ La prueba es satisfactoria si:
 ## Fiabilidad, recuperación y comodidad · 10 septiembre 2026
 
 - [ ] Crear → mover → Deshacer → Rehacer: conservar el mismo nodo y restaurar
-      posición, afinación, volumen y tiempos. Repetir con giro y cuatro diales.
+      posición, afinación, volumen y tiempos. Repetir con giro y cuatro faders.
       Tocar sin modificar no consume historial. Cancelar un gesto también debe
       dejar el último valor coherente y un solo paso de historial.
 - [ ] Silencio, sonido fijo, tempo y ciclos tienen Deshacer/Rehacer; ajustes
       sonoros conservan Play. Una edición nueva invalida Rehacer.
 - [ ] Añadir 8, 16 y 32 organismos; revisar separación, acceso al conector y
-      lectura de los cuatro diales. Borrar y añadir de nuevo sin superponer cuerpos.
+      lectura de los cuatro faders. Con varios efectos encendidos, comprobar que
+      las barras de un cuerpo no se confunden con las del vecino. Borrar y añadir
+      de nuevo sin superponer cuerpos.
 - [ ] Llevar Volumen a 0 % durante Play: oír silencio; subirlo sin reiniciar el
       recorrido. Repetir con silencio activado: subir volumen no debe desmutear.
 - [ ] Crear dos ataques del mismo nodo separados por ¼ beat a 180 BPM: comprobar

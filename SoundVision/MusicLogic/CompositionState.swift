@@ -519,9 +519,12 @@ final class CompositionState: ObservableObject {
 
     /// La rotación se acumula sobre el valor que el nodo tenía al empezar el
     /// gesto, para que soltar y volver a girar continúe en vez de reiniciar.
+    /// Orienta el organismo y nada más: los efectos se ajustan con los faders
+    /// del gizmo o con la consola, así que colocar un cuerpo como uno quiera
+    /// ya no borra un reverb ajustado al 1 %.
     func rotationEditBegan(id: UUID) {
         focusNode(id: id)
-        beginParameterEdit("Girar sonido")
+        beginParameterEdit("Girar organismo")
     }
 
     func rotateNode(id: UUID, addingTo origin: SIMD3<Float>, delta: SIMD3<Float>) {
@@ -539,12 +542,8 @@ final class CompositionState: ObservableObject {
         updated.rotationX = vector.x
         updated.rotationY = vector.y
         updated.rotationZ = vector.z
-        let effects = SpatialParameterMapper.effects(from: vector)
-        updated.reverb = effects.reverb
-        updated.delay = effects.delay
-        updated.distortion = effects.distortion
         if updated != nodes[index] {
-            recordUndo("Girar sonido")
+            recordUndo("Girar organismo")
             nodes[index] = updated
         }
     }
@@ -659,8 +658,10 @@ final class CompositionState: ObservableObject {
         let kick = testNode("Kick frontal", .kick, position: [0, 1.18, 0.78])
         let bass = testNode("Bass izquierdo", .bass, position: [-1.15, 1.0, -0.18])
         let hat = testNode("Hi-hat derecho", .hiHat, position: [1.12, 1.62, 0.12])
-        let pad = testNode("Pad alto y lejano", .pad, position: [0.12, 2.15, -1.35], rotation: [.pi * 0.62, 0, 0])
-        let fx = testNode("FX posterior", .fx, position: [0, 1.32, 2.28], rotation: [0, .pi * 0.48, .pi * 0.22])
+        let pad = testNode("Pad alto y lejano", .pad, position: [0.12, 2.15, -1.35],
+                           rotation: [.pi * 0.62, 0, 0], effects: (reverb: 0.62, delay: 0, distortion: 0))
+        let fx = testNode("FX posterior", .fx, position: [0, 1.32, 2.28],
+                          rotation: [0, .pi * 0.48, .pi * 0.22], effects: (reverb: 0, delay: 0.48, distortion: 0.22))
         nodes = [kick, bass, hat, pad, fx]
 
         connections = [
@@ -695,7 +696,7 @@ final class CompositionState: ObservableObject {
         "Pulsa Play. Debes oír Kick al frente y FX detrás; gira la cabeza para confirmar la localización.",
         "Selecciona Bass o Hi-hat y pulsa Escuchar. Compara izquierda y derecha sin mover el nodo.",
         "Arrastra un nodo arriba/abajo y cerca/lejos. Repite Escuchar para comprobar pitch, volumen y distancia.",
-        "Rota Pad o FX y escucha reverb, delay y distorsión.",
+        "Selecciona Pad o FX y sube sus faders de reverb, delay y distorsión: la barra sobre el cuerpo confirma el nivel.",
         "Tira del punto luminoso bajo un organismo y suelta el hilo sobre otro para conectarlos. Toca una conexión para cortarla.",
         "Detén, vuelve a reproducir y comprueba que controles, ondas y audio permanecen sincronizados."
     ]
@@ -894,17 +895,17 @@ final class CompositionState: ObservableObject {
         guard value.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
         let amount = max(0, min(value, 1))
         var updated = nodes[index]
+        // Subir un efecto ya no tumba el organismo. La orientación es del
+        // espacio —la elige la persona y ahí se queda— y el nivel del efecto
+        // lo enseña su barra sobre el cuerpo y su fader en el gizmo, que
+        // además distinguen los tres efectos entre sí. Con el giro como
+        // indicador, 60 % de reverb y 60 % de delay dejaban el mismo cuerpo
+        // torcido y no había forma de saber cuál estaba sonando.
         switch parameter {
         case .volume: updated.volume = amount
-        case .reverb:
-            updated.reverb = amount
-            updated.rotationX = amount * .pi
-        case .delay:
-            updated.delay = amount
-            updated.rotationY = amount * .pi
-        case .distortion:
-            updated.distortion = amount
-            updated.rotationZ = amount * .pi
+        case .reverb: updated.reverb = amount
+        case .delay: updated.delay = amount
+        case .distortion: updated.distortion = amount
         }
         if updated != nodes[index] {
             recordUndo("Ajustar \(parameter.title)")
@@ -977,9 +978,9 @@ final class CompositionState: ObservableObject {
         _ name: String,
         _ type: SoundNodeType,
         position: SIMD3<Float>,
-        rotation: SIMD3<Float> = .zero
+        rotation: SIMD3<Float> = .zero,
+        effects: (reverb: Float, delay: Float, distortion: Float) = (0, 0, 0)
     ) -> SoundNode {
-        let effects = SpatialParameterMapper.effects(from: rotation)
         return SoundNode(
             name: name,
             type: type,
