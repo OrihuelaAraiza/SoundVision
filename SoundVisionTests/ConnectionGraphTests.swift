@@ -40,6 +40,63 @@ final class ConnectionGraphTests: XCTestCase {
         XCTAssertTrue(state.unreachableNodeIDs().isEmpty)
     }
 
+    func testDraggingBothWaysAddsAudibleBranchesToTheExistingRoute() throws {
+        let state = CompositionState()
+        let root = state.createNode(of: .kick)
+        let left = state.createNode(of: .bell)
+        let right = state.createNode(of: .woodblock)
+        XCTAssertTrue(state.connectByDragging(from: .node(root), to: .node(left)))
+        XCTAssertTrue(state.connectByDragging(from: .node(right), to: .node(root)))
+
+        for edge in state.connections where edge.sourceNodeID != nil {
+            state.setConnectionBeats(id: edge.id, beats: 1)
+        }
+        state.togglePlayback()
+        defer { state.stopPlayback() }
+        let session = try XCTUnwrap(state.spatialAudioSession)
+        XCTAssertEqual(Set(session.events.filter { $0.beat == 1 }.map(\.nodeID)), [left, right])
+        XCTAssertTrue(state.unreachableNodeIDs().isEmpty)
+        XCTAssertEqual(state.connections.filter { $0.sourceNodeID == nil }.count, 1)
+    }
+
+    func testExistingNodeCanReconnectToFreePlayWithEitherDragDirection() throws {
+        for dragFromPlay in [true, false] {
+            let state = CompositionState()
+            state.createNode(of: .kick)
+            let existing = state.createNode(of: .flute)
+            let root = try XCTUnwrap(state.connections.first { $0.sourceNodeID == nil })
+            state.removeConnection(id: root.id)
+            let before = state.nodes.map(\.id)
+            XCTAssertTrue(state.connectByDragging(
+                from: dragFromPlay ? .play : .node(existing),
+                to: dragFromPlay ? .node(existing) : .play
+            ))
+            XCTAssertEqual(state.playEntryNodeID, existing)
+            XCTAssertEqual(state.nodes.map(\.id), before, "Reconectar no crea otro nodo")
+            state.undo()
+            XCTAssertNil(state.playEntryNodeID)
+        }
+    }
+
+    func testBothPlayDragDirectionsRejectAnOccupiedEntry() {
+        let state = CompositionState()
+        let root = state.createNode(of: .kick)
+        let other = state.createNode(of: .bell)
+        XCTAssertFalse(state.connectByDragging(from: .play, to: .node(other)))
+        XCTAssertFalse(state.connectByDragging(from: .node(other), to: .play))
+        XCTAssertEqual(state.playEntryNodeID, root)
+        XCTAssertEqual(state.connections.count, 1)
+    }
+
+    func testGestureKeepsExplicitCycleDirectionBetweenReachableNodes() {
+        let state = CompositionState()
+        let a = state.createNode(of: .kick)
+        let b = state.createNode(of: .bass)
+        state.connectByDragging(from: .node(a), to: .node(b))
+        XCTAssertTrue(state.connectByDragging(from: .node(b), to: .node(a)))
+        XCTAssertTrue(state.connections.contains { $0.sourceNodeID == b && $0.destinationNodeID == a })
+    }
+
     func testPlayRejectsASecondOutgoingConnection() {
         let state = CompositionState()
         state.createNode(of: .kick)

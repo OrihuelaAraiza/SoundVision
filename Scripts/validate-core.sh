@@ -15,6 +15,7 @@ xcrun swiftc \
   SoundVision/Learning/MusicLesson.swift \
   SoundVision/Audio/VoiceSynthesis.swift \
   SoundVision/Audio/VoiceSchedule.swift \
+  SoundVision/Audio/VoiceRenderHealth.swift \
   SoundVision/Audio/RealtimeVoice.swift \
   Scripts/Validation/main.swift -o "$validation_dir/validate"
 "$validation_dir/validate"

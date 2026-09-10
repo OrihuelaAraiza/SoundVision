@@ -36,6 +36,9 @@ los controles viven en la ventana principal, que se convierte en la consola del
 estudio al entrar. Es una ventana normal de visionOS: el sistema le da su barra
 de movimiento, la persona la coloca donde quiera y ahí se queda.
 
+Play aparece a la izquierda del eje central de la ventana, con espacio libre
+entre su zona de interacción y la consola al abrir el estudio.
+
 Una versión anterior anclaba los paneles a la cabeza con `AnchorEntity(.head)`.
 Eso los volvía inusables —seguían el giro de la cabeza, así que nunca podías
 mirarlos de frente— y obligó a inventar asas **MOVER**, ajustes de distancia y
@@ -66,6 +69,23 @@ consola.
 Para componer desde cero, pulsa **Nueva pista** y usa **Añadir sonido** en la
 consola. El primero será la única entrada desde Play; los siguientes aparecen
 libres para que decidas cómo conectarlos entre sí.
+
+Para añadir una rama libre, arrastra el conector entre ella y un nodo que ya
+tenga ruta desde Play: se crea la salida desde la ruta hacia la rama, empieces
+por cualquiera de los extremos. Entre dos nodos que ya tienen ruta, el gesto
+conserva su dirección para permitir ciclos y convergencias. **Añadir salida**
+en el inspector siempre conserva la dirección explícita que indica el menú.
+
+Si Play quedó libre, puedes arrastrar desde Play hasta un nodo existente o
+desde el conector de ese nodo hasta Play. Ambos gestos conectan el nodo sin
+crear otro. El inspector también muestra **Conectar a Play** cuando no hay
+entrada. Si la entrada está ocupada, hay que cortar esa conexión primero.
+
+El motor espera a que cada entidad espacial esté activa antes de engancharle
+audio y vuelve a comprobar las voces pendientes. Cada sesión publica las
+agendas de todas sus ramas y activa sus controladores. Durante Play, la
+recuperación de una voz detenida mantiene el reloj y las agendas de las otras;
+un fallo persistente muestra el nombre del sonido afectado en la consola.
 
 ## Cómo el espacio se convierte en música
 
@@ -307,17 +327,19 @@ regresiones de edición en vivo, mute/desmute, continuidad de sesión, deshacer 
 entrada de tiempos en el siguiente Play. La revisión de fluidez y espacialización
 con el visor sigue siendo una comprobación distinta de este arnés.
 
-Validación de esta revisión:
+Validación actual, incluida la corrección de ramas y reconexión de Play:
 - Compilación final para simulador (`build-for-testing`) y Vision Pro sin firma:
   correctas con comprobación estricta de concurrencia.
 - El arnés ejecutado pasó para los 24 timbres, edición en vivo, mute/desmute,
   continuidad del transporte, deshacer, añadir un nodo libre durante Play,
-  conexiones múltiples y las cuatro lecciones.
-- XCTest se interrumpió después de más de cinco minutos sin iniciar casos en
-  un simulador limpio de visionOS 26.5. El sistema mostró el entorno, pero no
-  respondió a Inicio. La instalación y el lanzamiento directo terminaron
-  correctamente tras una espera prolongada, pero no apareció la ventana de la
-  app y no fue posible revisar las pantallas.
-- No se considera ejecutado XCTest ni validada visualmente esta revisión. La
-  fluidez de los gestos, lectura de la interfaz y mezcla espacial deben probarse
-  en Vision Pro con `DEVICE_TEST_CHECKLIST.md`.
+  conexiones múltiples y las cuatro lecciones. La regresión adicional ejecuta
+  el callback de cada rama durante tres vueltas, comprueba simultaneidad,
+  convergencia y Stop, reconexión a Play en ambos sentidos y recuperación por voz.
+- XCTest ejecutó **73 casos, 0 fallos y 0 omitidos** en visionOS Simulator 26.5:
+  `ConnectionGraphTests`, `SoundVisionTests`, `LearningAndRoutingTests`,
+  `SpatialVoiceRendererTests`, `VoiceRenderHealthTests` y `LiveEditingTests`.
+- Se instaló y abrió la app en el simulador; la portada se mostró correctamente.
+  La herramienta de interacción devolvió `noWindowsAvailable` al intentar pulsar
+  dentro de la pantalla simulada, por lo que no se completó la revisión del estudio.
+- Pendientes en Vision Pro: separación cómoda de Play y consola, gestos con las
+  manos, mezcla espacial y fluidez. Usar `DEVICE_TEST_CHECKLIST.md`.

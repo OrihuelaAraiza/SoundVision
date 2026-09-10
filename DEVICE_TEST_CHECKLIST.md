@@ -1,5 +1,29 @@
 # Prueba física de SoundVision
 
+## Regresión: ramas, reconexión y separación de Play
+
+- [ ] Abrir **Crear una composición**: Play queda a la izquierda de la ventana.
+      Pulsar y desplazar el menú sin activar ni arrastrar Play accidentalmente.
+- [ ] Crear Kick, Campana y Woodblock. Unir Kick → Campana, y después arrastrar
+      desde Woodblock hacia Kick. Ambas conexiones deben salir de Kick. Fijar
+      las dos a 1 beat: deben oírse ambas ramas juntas en cada una de tres vueltas.
+- [ ] Repetir con **Añadir salida** desde Kick hacia cada rama. Silenciar cada
+      rama por separado para distinguirlas y confirmar que la otra sigue sonando.
+- [ ] Cortar la conexión de Play y arrastrarlo hacia un nodo existente: debe
+      conectarlo, sin cambiar el número de nodos. Deshacer y repetir desde el
+      conector del nodo hacia Play. Repetir con **Conectar a Play** en Nodo.
+- [ ] Con Play ocupado, repetir ambos gestos hacia otro nodo: debe conservarse
+      la entrada actual y mostrarse el aviso de entrada ocupada.
+- [ ] Soltar un hilo sobre el cuerpo y sobre el conector de un nodo rotado.
+      El resaltado debe anticipar el destino y desaparecer al soltar en vacío.
+- [ ] Crear y conectar ramas después de entrar en el estudio; repetir Play y
+      Stop, y comprobar que ninguna voz queda muda al volver a reproducir.
+
+La prueba directa de `Scripts/validate-core.sh` cubre el recorrido desde los
+gestos resueltos hasta las muestras de cada rama, tres vueltas, Stop y la
+decisión de recuperar una voz detenida. No sustituye la escucha espacial ni
+los gestos con las manos en Vision Pro.
+
 ## Antes de empezar
 
 - Usa un espacio despejado y permanece sentado o de pie en un punto estable.

@@ -200,3 +200,88 @@ var lastMuted: [Float] = []
 for block in 41..<65 { lastMuted = render(mutedVoice, at: mutedStart + Double(block * 512) / 48_000) }
 check(lastMuted.allSatisfy { abs($0) < 0.0001 }, "Mute did not fade to silence")
 print("PASS live renderer: initially muted, unmute, pitch/effects, mute fade without schedule replacement")
+
+// Recorrido completo: gestos en ambos sentidos -> estado -> Play -> agendas
+// por nodo -> callback de audio real, incluidas ramas simultáneas y tres loops.
+MainActor.assumeIsolated {
+    let state = CompositionState()
+    let root = state.createNode(of: .kick)
+    let left = state.createNode(of: .bell)
+    let right = state.createNode(of: .woodblock)
+    let end = state.createNode(of: .flute)
+    check(state.connectByDragging(from: .node(root), to: .node(left)), "Outgoing branch rejected")
+    check(state.connectByDragging(from: .node(right), to: .node(root)), "Reverse drag lost the branch")
+    check(state.connect(sourceID: left, destinationID: end), "First convergence rejected")
+    check(state.connect(sourceID: right, destinationID: end), "Second convergence rejected")
+    for edge in state.connections where edge.sourceNodeID != nil {
+        state.setConnectionBeats(id: edge.id, beats: edge.sourceNodeID == right ? 2 : 1)
+    }
+    state.togglePlayback()
+    defer { state.stopPlayback() }
+    guard let session = state.spatialAudioSession else { fatalError("Branch session missing") }
+    check(Set(session.events.filter { $0.beat == 1 }.map(\.nodeID)) == [left, right], "Simultaneous branch lost")
+    check(session.events.filter { $0.nodeID == end }.map(\.beat) == [2, 3], "Convergence timing lost")
+    check(state.unreachableNodeIDs().isEmpty, "Connected branch is unreachable")
+    let start = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+    let period = session.loopDurationSeconds!
+    let attacks = session.attackTimesByNode(startSeconds: start)
+    var voices: [UUID: SpatialVoiceRenderer] = [:]
+    for node in session.nodes {
+        let voice = SpatialVoiceRenderer(node: node, sustainSeconds: 0.3)
+        voice.schedule.publish(attacks[node.id]!, loopStart: start, repeatingEvery: period)
+        voices[node.id] = voice
+    }
+    var peaks = Dictionary(uniqueKeysWithValues: voices.keys.map { ($0, [Float](repeating: 0, count: 3)) })
+    var simultaneousBlocks = 0
+    let blocks = Int(ceil(period * 3 * 48_000 / 512))
+    for block in 0..<blocks {
+        let elapsed = Double(block * 512) / 48_000
+        let loop = min(2, Int(elapsed / period))
+        var audible: Set<UUID> = []
+        for (id, voice) in voices {
+            let samples = render(voice, at: start + elapsed)
+            check(samples.allSatisfy(\.isFinite), "Non-finite branch samples")
+            let peak = samples.map(abs).max() ?? 0
+            peaks[id]![loop] = max(peaks[id]![loop], peak)
+            if peak > 0.0001 { audible.insert(id) }
+        }
+        if audible.contains(left) && audible.contains(right) { simultaneousBlocks += 1 }
+    }
+    check(peaks.values.allSatisfy { $0.allSatisfy { $0 > 0.0001 } }, "A branch was silent during a loop")
+    check(simultaneousBlocks >= 3, "Branch voices did not mix in the same audio block")
+    let stop = start + Double(blocks * 512) / 48_000
+    for voice in voices.values {
+        voice.schedule.stop(at: stop)
+        check(render(voice, at: stop + 0.1).allSatisfy { abs($0) < 0.0001 }, "Stop left a branch running")
+    }
+    print("PASS branch audio: both gesture directions, simultaneous voices, convergence, three loops, Stop")
+
+    for fromPlay in [true, false] {
+        let entry = state.connections.first { $0.sourceNodeID == nil }!
+        state.removeConnection(id: entry.id)
+        let ids = state.nodes.map(\.id)
+        check(state.connectByDragging(from: fromPlay ? .play : .node(root),
+                                      to: fromPlay ? .node(root) : .play), "Existing node did not reconnect")
+        check(state.nodes.map(\.id) == ids && state.playEntryNodeID == root, "Reconnect created/replaced a node")
+        check(!state.connectByDragging(from: .play, to: .node(left)), "Play accepted a second entry")
+        check(!state.connectByDragging(from: .node(left), to: .play), "Reverse drag replaced Play entry")
+        state.undo()
+        check(state.playEntryNodeID == nil, "Undo did not free Play")
+        state.connectToPlay(id: root)
+    }
+    print("PASS Play reconnection: existing node, both directions, one entry, undo")
+}
+
+var rootHealth = VoiceRenderHealth()
+var branchHealth = VoiceRenderHealth()
+check(!rootHealth.needsRestart(blocks: 10, isPlaying: true, now: 0), "Healthy voice restarted")
+check(!branchHealth.needsRestart(blocks: 0, isPlaying: true, now: 0), "Missing startup grace")
+check(!rootHealth.needsRestart(blocks: 20, isPlaying: true, now: 2), "Healthy root interrupted")
+check(branchHealth.needsRestart(blocks: 0, isPlaying: true, now: 2), "Healthy root hid a silent branch")
+check(!branchHealth.needsRestart(blocks: 0, isPlaying: true, now: 3), "Recovery retried too quickly")
+check(branchHealth.needsRestart(blocks: 0, isPlaying: true, now: 4), "Recovery retry missing")
+check(!branchHealth.needsRestart(blocks: 0, isPlaying: true, now: 6), "Recovery retries are unbounded")
+check(!branchHealth.needsRestart(blocks: 10, isPlaying: true, now: 7) && !branchHealth.isStalled, "Recovered voice still stalled")
+var stoppedHealth = VoiceRenderHealth()
+check(stoppedHealth.needsRestart(blocks: 0, isPlaying: false, now: 0), "Stopped controller not recovered")
+print("PASS per-voice health: isolated branch recovery, bounded retries, stopped controller")
