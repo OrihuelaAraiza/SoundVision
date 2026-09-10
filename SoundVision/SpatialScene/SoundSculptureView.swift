@@ -5,16 +5,18 @@ import Spatial
 import SwiftUI
 
 /// El espacio inmersivo contiene únicamente la escultura sonora y sus gestos.
-/// Todos los controles viven en `StudioConsoleView`, una ventana del sistema:
-/// anclar paneles a la cabeza los volvía imposibles de mirar, porque seguían el
-/// giro de la persona en lugar de esperarla.
+/// La consola vive en una ventana del sistema; los efectos también se pueden
+/// ajustar con el gizmo del nodo seleccionado, anclado al propio organismo.
 struct SoundSculptureView: View {
     @EnvironmentObject private var state: CompositionState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var audioEngine = AudioEngineManager()
     /// Referencia, no valor: mutar sus campos durante un gesto no invalida la
     /// vista. Guardar el origen del arrastre en `@State` provocaba una pasada de
     /// SwiftUI por cada frame de movimiento.
     @State private var scene = SculptureBridge()
+    @GestureState private var isDragging = false
+    @GestureState private var isRotating = false
 
     var body: some View {
         RealityView { content in
@@ -48,6 +50,12 @@ struct SoundSculptureView: View {
         .gesture(tapGesture)
         .simultaneousGesture(dragGesture)
         .simultaneousGesture(rotationGesture)
+        .onChange(of: isDragging) { _, active in
+            if !active { finishInterruptedDrag() }
+        }
+        .onChange(of: isRotating) { _, active in
+            if !active { scene.rotationOrigins = [:]; state.endParameterEdit() }
+        }
         .onAppear {
             audioEngine.prepare()
             // Los destellos van directo a las entidades. Publicarlos obligaba a
@@ -61,6 +69,19 @@ struct SoundSculptureView: View {
             // podía caerse en pleno pasaje rápido.
             let bridge = scene
             state.onSoundingChanged = { [bridge] ids in bridge.applySounding(ids) }
+            state.onVisualAttack = { [bridge] id in bridge.emitAttack(id) }
+            let engine = audioEngine
+            let model = state
+            state.scheduleAudio = { [weak engine, weak model, bridge] session in
+                guard let engine, let model, let root = bridge.root else { return nil }
+                let sustain = model.sustainBeatsByNode()
+                engine.updateTempo(bpm: model.sequencer.bpm)
+                engine.attachVoices(for: model.nodes, sustainBeats: sustain) { bridge.entity(for: $0, in: root) }
+                engine.updateLiveParameters(nodes: model.nodes, sustainBeats: sustain)
+                let start = engine.publish(session: session)
+                model.audioProblem = engine.problemSummary
+                return start
+            }
         }
         .task {
             // Un latido de 1 Hz basta para que la consola cuente qué está
@@ -100,7 +121,13 @@ struct SoundSculptureView: View {
             // El espacio también puede cerrarse desde el sistema (corona
             // digital). Sin esto la ventana seguía mostrando la consola de un
             // estudio que ya no existía.
+            state.endParameterEdit()
+            state.flushRecovery()
             state.onSoundingChanged = nil
+            state.onVisualAttack = nil
+            state.scheduleAudio = nil
+            scene.effectEdit = nil
+            scene.effectGizmo?.synchronize(node: nil)
             audioEngine.stopAll()
             state.stopPlayback()
             state.audioDiagnostics = nil
@@ -154,7 +181,10 @@ struct SoundSculptureView: View {
                 // acababa deseleccionándolo y vaciando la pestaña Nodo.
                 guard !scene.isSettlingAfterDrag(at: CACurrentMediaTime()) else { return }
 
-                if TransportNodeFactory.isTransportEntity(value.entity) {
+                if let handle = NodeEffectGizmo.handle(from: value.entity) {
+                    guard state.selectedNodeID == handle.nodeID else { return }
+                    state.statusMessage = "\(handle.parameter.title): mantén la pinza y arrastra arriba para aumentar o abajo para reducir."
+                } else if TransportNodeFactory.isTransportEntity(value.entity) {
                     state.togglePlayback()
                 } else if let connectionID = ConnectionLineSystem.id(from: value.entity) {
                     // Cortar es inmediato: el historial de deshacer lo respalda.
@@ -168,7 +198,12 @@ struct SoundSculptureView: View {
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .targetedToAnyEntity()
+            .updating($isDragging) { _, active, _ in active = true }
             .onChanged { value in
+                if let handle = NodeEffectGizmo.handle(from: value.entity) {
+                    updateEffectDrag(handle: handle, translationY: Double(value.translation.height))
+                    return
+                }
                 guard let root = sculptureRoot(from: value.entity) else { return }
 
                 // El seguimiento puede entregar una coordenada no finita durante
@@ -206,6 +241,7 @@ struct SoundSculptureView: View {
                     // distancia de golpe en cuanto empezaba a moverse.
                     scene.dragReferences[id] = current
                     state.focusNode(id: id)
+                    state.beginParameterEdit("Mover sonido")
                 }
                 let reference = scene.dragReferences[id] ?? current
                 let target = state.clampedPosition(origin + (current - reference))
@@ -215,6 +251,7 @@ struct SoundSculptureView: View {
                 // 90 Hz reconstruía la consola entera (con sus sliders) tantas
                 // veces por segundo que dejaba de responder y de hacer scroll.
                 scene.setLivePosition(target, for: id, in: root)
+                scene.effectGizmo?.move(to: target, node: node)
                 ConnectionLineSystem.updateGeometry(
                     in: root,
                     movedNodeID: id,
@@ -228,6 +265,18 @@ struct SoundSculptureView: View {
                 scene.pendingDragTarget = target
             }
             .onEnded { value in
+                if NodeEffectGizmo.handle(from: value.entity) != nil {
+                    if let edit = scene.effectEdit {
+                        edit.update(translationY: Double(value.translation.height), at: CACurrentMediaTime(), state: state, finish: true)
+                        if state.selectedNodeID == edit.nodeID {
+                            state.statusMessage = "\(edit.parameter.title) · \(Int((edit.value * 100).rounded())) %"
+                        }
+                    }
+                    scene.effectEdit = nil
+                    scene.noteDragEnded(at: CACurrentMediaTime())
+                    syncEffectGizmo()
+                    return
+                }
                 if let source = scene.connectionSource,
                    let root = sculptureRoot(from: value.entity) {
                     // Resolver de nuevo al soltar: el último onChanged puede
@@ -265,11 +314,50 @@ struct SoundSculptureView: View {
                     scene.dragOrigins[id] = nil
                     scene.dragReferences[id] = nil
                     scene.pendingDragTarget = nil
+                    state.endParameterEdit()
                 }
             }
     }
 
+    private func finishInterruptedDrag() {
+        // GestureState resets on cancellation as well as completion. Keep the
+        // last displayed value, then seal the edit instead of leaving it open.
+        if let id = scene.dragOrigins.keys.first, let target = scene.pendingDragTarget {
+            state.moveNode(id: id, to: target)
+        }
+        scene.dragOrigins = [:]
+        scene.dragReferences = [:]
+        scene.pendingDragTarget = nil
+        if let edit = scene.effectEdit, state.selectedNodeID == edit.nodeID {
+            state.setSoundParameter(id: edit.nodeID, parameter: edit.parameter, value: edit.value)
+        }
+        scene.effectEdit = nil
+        if scene.connectionSource != nil { clearTendril() }
+        state.endParameterEdit()
+        syncEffectGizmo()
+    }
+
     private var sculptureName: String { "sound-sculpture" }
+
+    private func updateEffectDrag(handle: NodeEffectHandleComponent, translationY: Double) {
+        guard state.selectedNodeID == handle.nodeID, let node = state.node(id: handle.nodeID) else { return }
+        if scene.effectEdit == nil {
+            scene.effectEdit = SpatialEffectEditingSession(node: node, parameter: handle.parameter, translationY: translationY)
+        }
+        guard let edit = scene.effectEdit, edit.nodeID == handle.nodeID, edit.parameter == handle.parameter else { return }
+        edit.update(translationY: translationY, at: CACurrentMediaTime(), state: state)
+        syncEffectGizmo()
+    }
+
+    private func syncEffectGizmo() {
+        let node = state.selectedNode
+        let edit = scene.effectEdit.flatMap { $0.nodeID == node?.id ? $0 : nil }
+        // El cuerpo puede llevar unos milisegundos de ventaja al estado durante
+        // un movimiento. Seguir su componente evita que el gizmo se quede atrás.
+        let position = node.flatMap { scene.nodeEntities[$0.id]?.components[SoundNodeVisualComponent.self]?.position }
+            .map { $0 + [0, node.map { NodeVisualStyle.style(for: $0.type).verticalOffset } ?? 0, 0] }
+        scene.effectGizmo?.synchronize(node: node, position: position, editing: edit?.parameter, pendingValue: edit?.value)
+    }
 
     /// Sube por la jerarquía hasta la raíz de la escultura. Derivarla de la
     /// entidad tocada no puede fallar, a diferencia de guardarla al construir.
@@ -306,15 +394,17 @@ struct SoundSculptureView: View {
     private var rotationGesture: some Gesture {
         RotateGesture3D()
             .targetedToAnyEntity()
+            .updating($isRotating) { _, active, _ in active = true }
             .onChanged { value in
+                guard NodeEffectGizmo.handle(from: value.entity) == nil, scene.effectEdit == nil else { return }
                 guard let id = NodeEntityFactory.id(from: value.entity),
                       let node = state.node(id: id)
                 else { return }
 
                 let origin = scene.rotationOrigins[id] ?? [node.rotationX, node.rotationY, node.rotationZ]
                 if scene.rotationOrigins[id] == nil {
+                    state.rotationEditBegan(id: id)
                     scene.rotationOrigins[id] = origin
-                    state.focusNode(id: id)
                 }
 
                 let rotation = simd_quatf(value.rotation)
@@ -323,6 +413,7 @@ struct SoundSculptureView: View {
             .onEnded { value in
                 if let id = NodeEntityFactory.id(from: value.entity) {
                     scene.rotationOrigins[id] = nil
+                    state.endParameterEdit()
                 }
             }
     }
@@ -336,6 +427,9 @@ struct SoundSculptureView: View {
         root.position = SpatialSceneLayout.rootPosition
         root.addChild(ConnectionLineSystem.makeContainer())
         root.addChild(TransportNodeFactory.make())
+        let gizmo = NodeEffectGizmo()
+        root.addChild(gizmo.root)
+        scene.effectGizmo = gizmo
         state.nodes.forEach { root.addChild(NodeEntityFactory.makeNode($0)) }
         root.components.set(SceneMembershipRevisionComponent(value: state.sceneContentRevision))
         scene.adopt(root: root)
@@ -368,14 +462,16 @@ struct SoundSculptureView: View {
             in: root,
             nodes: state.nodes,
             connections: state.connections,
-            triggeredIDs: sounding
+            triggeredIDs: sounding,
+            selectedNodeID: state.selectedNodeID
         )
 
         if let transport = scene.transport {
             transport.components.set(TransportVisualComponent(
                 isPlaying: state.graphTransport.isPlaying,
                 activeCount: state.nodes.filter(\.isActive).count,
-                triggeredCount: sounding.count
+                triggeredCount: sounding.count,
+                reduceMotion: reduceMotion
             ))
         }
 
@@ -395,7 +491,8 @@ struct SoundSculptureView: View {
                 // seleccionado: dice "suelta aquí" sin necesidad de texto.
                 isSelected: state.selectedNodeID == node.id || scene.tendrilCandidate == .node(node.id),
                 isTriggered: sounding.contains(node.id),
-                isConnectionSource: scene.connectionSource == .node(node.id)
+                isConnectionSource: scene.connectionSource == .node(node.id),
+                reduceMotion: reduceMotion
             )
             // Un nodo en pleno arrastre manda sobre el estado: su posición la
             // escribe el gesto a frame rate y el estado va detrás.
@@ -407,6 +504,7 @@ struct SoundSculptureView: View {
                 entity.components.set(component)
             }
         }
+        syncEffectGizmo()
     }
 
     /// Publica el diagnóstico del motor **fuera** del ciclo de actualización:
@@ -427,6 +525,13 @@ struct SoundSculptureView: View {
         in root: Entity
     ) {
         scene.tendrilCandidate = candidate
+        let hint = candidate.map { state.connectionProposal(from: source, to: $0).message }
+            ?? "Suelta el hilo sobre un organismo o sobre Play libre."
+        if state.connectionHint != hint {
+            state.connectionHint = hint
+            let valid = candidate.map { state.connectionProposal(from: source, to: $0).isValid } ?? true
+            scene.tendril?.model?.materials = [UnlitMaterial(color: valid ? .systemCyan : .systemOrange)]
+        }
         let sourceNode: SoundNode?
         if case .node(let id) = source { sourceNode = state.node(id: id) } else { sourceNode = nil }
 
@@ -463,6 +568,7 @@ struct SoundSculptureView: View {
     }
 
     private func clearTendril() {
+        state.connectionHint = nil
         scene.connectionSource = nil
         scene.tendrilCandidate = nil
         scene.tendril?.removeFromParent()
@@ -497,6 +603,8 @@ private final class SculptureBridge {
     var soundingIDs: Set<UUID> = []
     var pendingDragTarget: SIMD3<Float>?
     var dragReferences: [UUID: SIMD3<Float>] = [:]
+    var effectGizmo: NodeEffectGizmo?
+    var effectEdit: SpatialEffectEditingSession?
     private var lastDragCommit: TimeInterval = -.infinity
     private var lastDragEnd: TimeInterval = -.infinity
 
@@ -559,6 +667,11 @@ private final class SculptureBridge {
         if let root {
             ConnectionLineSystem.applyTriggerHighlights(in: root, triggeredIDs: ids)
         }
+    }
+
+    func emitAttack(_ id: UUID) {
+        guard let entity = nodeEntities[id] else { return }
+        VisualAttackFeedback.emit(on: entity, at: CACurrentMediaTime())
     }
 
     func noteDragEnded(at time: TimeInterval) {

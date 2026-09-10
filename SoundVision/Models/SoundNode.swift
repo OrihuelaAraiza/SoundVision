@@ -330,7 +330,7 @@ extension Composition {
     /// escrito a medias. Nada de eso debe poder tumbar la app: identificadores
     /// repetidos hacían caer un `Dictionary`, y una conexión hacia un nodo que
     /// ya no existe dejaba líneas apuntando al vacío.
-    func sanitized() -> Composition {
+    func sanitized(repairMissingPlayEntry: Bool = true) -> Composition {
         var seenNodes = Set<UUID>()
         let uniqueNodes = nodes
             .filter { seenNodes.insert($0.id).inserted }
@@ -369,7 +369,7 @@ extension Composition {
         // Un grafo con organismos pero sin entrada nunca puede sonar. Para datos
         // antiguos o escritos a medias se rescata únicamente el primer organismo;
         // jamás se vuelve a crear el abanico PLAY -> todos.
-        if !uniqueNodes.isEmpty, !hasPlayEntry {
+        if repairMissingPlayEntry, !uniqueNodes.isEmpty, !hasPlayEntry {
             cleanConnections.insert(
                 SoundConnection(sourceNodeID: nil, destinationNodeID: uniqueNodes[0].id),
                 at: 0

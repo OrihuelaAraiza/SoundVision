@@ -103,7 +103,7 @@ let cycle = [SoundConnection(sourceNodeID: nil, destinationNodeID: nodes[0].id),
 check(GraphSchedule.makePlan(nodes: nodes, connections: cycle, loopPasses: 2).events.map(\.beat) == [0, 1, 2, 3, 4], "Cycle regression")
 print("PASS bounded cycles")
 
-MainActor.assumeIsolated {
+await MainActor.run {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
     defer { try? FileManager.default.removeItem(at: url) }
     let state = CompositionState(storage: CompositionStorage(customURL: url))
@@ -145,7 +145,7 @@ let lowBass = SoundNode(name: "Low", type: .bass, pitch: -24, positionX: 0, posi
 check(SpatialParameterMapper.noteName(for: lowBass) == "La-1", "Incorrect bass register")
 print("PASS note register at lowest supported pitch")
 
-MainActor.assumeIsolated {
+await MainActor.run {
     let state = CompositionState()
     let a = state.createNode(of: .electricPiano, at: [0, 1.25, 0])
     let b = state.createNode(of: .flute, at: [0.5, 1.25, 0])
@@ -203,7 +203,7 @@ print("PASS live renderer: initially muted, unmute, pitch/effects, mute fade wit
 
 // Recorrido completo: gestos en ambos sentidos -> estado -> Play -> agendas
 // por nodo -> callback de audio real, incluidas ramas simultáneas y tres loops.
-MainActor.assumeIsolated {
+await MainActor.run {
     let state = CompositionState()
     let root = state.createNode(of: .kick)
     let left = state.createNode(of: .bell)
@@ -285,3 +285,39 @@ check(!branchHealth.needsRestart(blocks: 10, isPlaying: true, now: 7) && !branch
 var stoppedHealth = VoiceRenderHealth()
 check(stoppedHealth.needsRestart(blocks: 0, isPlaying: false, now: 0), "Stopped controller not recovered")
 print("PASS per-voice health: isolated branch recovery, bounded retries, stopped controller")
+
+await MainActor.run {
+    for parameter in SoundParameter.allCases {
+        let state = CompositionState()
+        let id = state.createNode(of: .organ)
+        state.setSoundParameter(id: id, parameter: parameter, value: 0.25)
+        state.togglePlayback()
+        defer { state.stopPlayback() }
+        let before = state.node(id: id)!
+        let session = state.spatialAudioSession!
+        let edit = SpatialEffectEditingSession(node: before, parameter: parameter, translationY: 0)
+        edit.update(translationY: 0, at: 0, state: state)
+        check(state.node(id: id) == before, "Gizmo jumped when grabbed")
+        edit.update(translationY: -48, at: 0.01, state: state)
+        edit.update(translationY: -72, at: 0.02, state: state)
+        edit.update(translationY: -96, at: 0.03, state: state, finish: true)
+        let after = state.node(id: id)!
+        check(abs(parameter.value(in: after) - 0.65) < 0.0001, "Gizmo lost final value")
+        for other in SoundParameter.allCases where other != parameter {
+            check(other.value(in: after) == other.value(in: before), "Gizmo changed another effect")
+        }
+        check(after.positionX == before.positionX && after.positionY == before.positionY && after.positionZ == before.positionZ, "Gizmo moved the node")
+        check(state.graphTransport.isPlaying && state.spatialAudioSession?.id == session.id, "Gizmo interrupted playback")
+        check(state.spatialAudioSession?.events == session.events && !state.hasPendingTimingChanges, "Gizmo changed the graph rhythm")
+        state.undo()
+        check(state.node(id: id) == before && state.graphTransport.isPlaying, "Gizmo undo is not one continuous edit")
+    }
+    var drag = SpatialEffectDrag(value: 0.5, translationY: 10)
+    check(drag.update(translationY: -500) == 1, "Gizmo exceeded maximum")
+    check(abs(drag.update(translationY: -476)! - 0.9) < 0.0001, "Gizmo stuck at maximum")
+    check(drag.update(translationY: 500) == 0, "Gizmo exceeded minimum")
+    check(drag.update(translationY: .nan) == nil && drag.update(translationY: .infinity) == nil, "Gizmo accepted invalid gesture")
+    print("PASS spatial effect gizmo: four live controls, no jump, final value, limits, independent parameters, one undo, continuous playback")
+}
+
+try await runQualityChecks()

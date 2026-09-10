@@ -150,11 +150,15 @@ struct PlaybackOrderView: View {
             .navigationTitle("Orden de reproducción")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Listo") { dismiss() } } }
         }
-        .task(id: showsDraft) {
-            if !showsDraft, state.graphTransport.isPlaying, let session = state.spatialAudioSession {
-                plan = GraphPlaybackPlan(events: session.events, isTruncated: false)
-                return
-            }
+        .task(id: showsDraft) { refreshPlan() }
+        .onChange(of: state.snapshot) { _, _ in refreshPlan() }
+        .onChange(of: state.graphTransport.isPlaying) { _, _ in refreshPlan() }
+    }
+
+    private func refreshPlan() {
+        if !showsDraft, state.graphTransport.isPlaying, let session = state.spatialAudioSession {
+            plan = GraphPlaybackPlan(events: session.events, isTruncated: false)
+        } else {
             plan = GraphSchedule.makePlan(nodes: state.nodes, connections: state.connections,
                                           loopPasses: state.graphTransport.loopPasses)
         }

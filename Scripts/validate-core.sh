@@ -5,11 +5,16 @@ validation_dir=$(mktemp -d /tmp/soundvision-validation.XXXXXX)
 trap 'rm -rf "$validation_dir"' EXIT
 xcrun swiftc \
   SoundVision/Models/SoundNode.swift \
+  SoundVision/MusicLogic/CompositionHistory.swift \
+  SoundVision/MusicLogic/SpatialNodePlacement.swift \
+  SoundVision/Persistence/SessionRecovery.swift \
+  SoundVision/Audio/PlaybackClock.swift \
   SoundVision/MusicLogic/SpatialParameterMapper.swift \
   SoundVision/MusicLogic/GraphSchedule.swift \
   SoundVision/MusicLogic/GraphTransport.swift \
   SoundVision/MusicLogic/Sequencer.swift \
   SoundVision/MusicLogic/CompositionState.swift \
+  SoundVision/MusicLogic/SpatialEffectDrag.swift \
   SoundVision/Persistence/CompositionStorage.swift \
   SoundVision/Audio/SpatialAudioSession.swift \
   SoundVision/Learning/MusicLesson.swift \
@@ -17,5 +22,6 @@ xcrun swiftc \
   SoundVision/Audio/VoiceSchedule.swift \
   SoundVision/Audio/VoiceRenderHealth.swift \
   SoundVision/Audio/RealtimeVoice.swift \
+  Scripts/Validation/QualityChecks.swift \
   Scripts/Validation/main.swift -o "$validation_dir/validate"
 "$validation_dir/validate"

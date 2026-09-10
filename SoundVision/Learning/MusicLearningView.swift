@@ -5,6 +5,7 @@ struct MusicLearningView: View {
     @AppStorage("soundvision.completedLessons") private var completedLessons = ""
     @State private var feedback: String?
     @State private var didPass = false
+    @State private var issues: [MusicLesson.Feedback] = []
 
     private var completed: Set<String> { Set(completedLessons.split(separator: ",").map(String.init)) }
 
@@ -33,7 +34,8 @@ struct MusicLearningView: View {
                 Text("Escucha con Reproducir, ajusta el ejercicio y vuelve aquí para comprobarlo.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button {
-                    didPass = state.lessonHasPlayed && lesson.isComplete(state.snapshot)
+                    issues = state.lessonHasPlayed ? lesson.feedback(for: state.snapshot) : []
+                    didPass = state.lessonHasPlayed && issues.isEmpty
                     if didPass {
                         var values = completed
                         values.insert(lesson.id)
@@ -41,7 +43,7 @@ struct MusicLearningView: View {
                         feedback = lesson.success
                     } else {
                         feedback = state.lessonHasPlayed
-                            ? "Todavía falta un ajuste. Revisa el reto y consulta el orden de reproducción en la pestaña Estudio."
+                            ? "Estos ajustes te ayudarán a completar el reto:"
                             : "Primero pulsa Reproducir para escuchar el ejercicio."
                     }
                 } label: {
@@ -54,8 +56,17 @@ struct MusicLearningView: View {
                         .foregroundStyle(didPass ? .green : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                ForEach(issues) { issue in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(issue.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+                        if let id = issue.nodeID {
+                            Button("Ir a este sonido") { state.focusNode(id: id); state.studioSection = .node }
+                                .buttonStyle(.bordered)
+                        }
+                    }.padding(12).background(.white.opacity(0.04), in: .rect(cornerRadius: 12))
+                }
                 HStack {
-                    Button("Reiniciar práctica") { state.beginLesson(lesson); feedback = nil }
+                    Button("Reiniciar práctica") { state.beginLesson(lesson); feedback = nil; issues = []; didPass = false }
                     Spacer()
                     if didPass, let index = MusicLesson.allCases.firstIndex(of: lesson), index + 1 < MusicLesson.allCases.count {
                         Button("Siguiente") { state.beginLesson(MusicLesson.allCases[index + 1]) }
@@ -92,6 +103,7 @@ struct MusicLearningView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .onChange(of: state.activeLesson) { _, _ in feedback = nil; didPass = false }
+        .onChange(of: state.snapshot) { _, _ in feedback = nil; issues = []; didPass = false }
+        .onChange(of: state.activeLesson) { _, _ in feedback = nil; issues = []; didPass = false }
     }
 }

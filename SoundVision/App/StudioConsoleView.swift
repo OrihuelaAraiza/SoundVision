@@ -4,6 +4,8 @@ struct StudioConsoleView: View {
     @EnvironmentObject private var state: CompositionState
     let onExit: () -> Void
     @State private var showsOrder = false
+    @AppStorage("soundvision.guideDismissed") private var guideDismissed = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         TabView(selection: $state.studioSection) {
@@ -24,30 +26,46 @@ struct StudioConsoleView: View {
         .tint(StudioDesign.accent)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) { playbackBar }
+        .onChange(of: state.studioSection) { _, _ in state.endParameterEdit() }
         .sheet(isPresented: $showsOrder) { PlaybackOrderView() }
     }
 
     private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20, content: content)
+            VStack(alignment: .leading, spacing: 20) {
+                if !guideDismissed && state.activeLesson == nil { quickStart }
+                content()
+            }
                 .frame(maxWidth: .infinity, alignment: .leading).padding(22)
         }
         .scrollIndicators(.hidden)
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            HStack(spacing: 12) {
             Image(systemName: "waveform.path").font(.title2).foregroundStyle(StudioDesign.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("SOUNDVISION").font(.system(.callout, design: .rounded).weight(.heavy)).tracking(2)
                 Text(state.activeLesson == nil ? "ESTUDIO ESPACIAL" : "PRÁCTICA MUSICAL")
-                    .font(.system(size: 11, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
+                    .font(.caption2.weight(.semibold)).tracking(1).foregroundStyle(.secondary)
+                Text(state.saveStatus).font(.caption2).foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
+            }
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            HStack(spacing: 8) {
             Button { state.undo() } label: { Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44) }
                 .buttonStyle(.borderless).disabled(!state.canUndo)
                 .accessibilityLabel(state.undoLabel.map { "Deshacer \($0)" } ?? "Deshacer")
+            Button { state.redo() } label: { Image(systemName: "arrow.uturn.forward").frame(width: 44, height: 44) }
+                .buttonStyle(.borderless).disabled(!state.canRedo)
+                .accessibilityLabel(state.redoLabel.map { "Rehacer \($0)" } ?? "Rehacer")
             Menu {
+                Button("Ver guía inicial") { guideDismissed = false; state.studioSection = .transport }
+                Divider()
                 Button { state.save() } label: { Label("Guardar composición", systemImage: "square.and.arrow.down") }
                     .disabled(state.activeLesson != nil)
                 Button { state.load() } label: { Label("Cargar composición", systemImage: "folder") }
@@ -61,7 +79,7 @@ struct StudioConsoleView: View {
                 Divider()
                 Button("Salir del estudio", action: onExit)
             } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-            .accessibilityLabel("Opciones de composición")
+            .accessibilityLabel("Opciones de composición")            }
         }
         .padding(.horizontal, 22).padding(.vertical, 12)
         .background(StudioDesign.ink.opacity(0.8))
@@ -70,7 +88,10 @@ struct StudioConsoleView: View {
 
     private var playbackBar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 16) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                : AnyLayout(HStackLayout(spacing: 16))
+            layout {
                 Button { state.togglePlayback() } label: {
                     Label(state.graphTransport.isPlaying ? "Detener" : "Reproducir",
                           systemImage: state.graphTransport.isPlaying ? "stop.fill" : "play.fill")
@@ -79,17 +100,21 @@ struct StudioConsoleView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(state.graphTransport.isPlaying ? .pink : StudioDesign.accent)
                 .disabled(state.playEntryNodeID == nil)
-                Spacer(minLength: 0)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                 VStack(alignment: .trailing, spacing: 3) {
                     Text("\(Int(state.sequencer.bpm)) BPM").font(.callout.monospacedDigit().bold())
                     Label(state.graphTransport.isPlaying ? "EN VIVO" : "LISTO",
                           systemImage: state.graphTransport.isPlaying ? "circle.fill" : "circle")
-                        .font(.system(size: 11, weight: .bold)).foregroundStyle(state.graphTransport.isPlaying ? .green : .secondary)
+                        .font(.caption2.bold()).foregroundStyle(state.graphTransport.isPlaying ? .green : .secondary)
                 }
                 if state.activeLesson != nil && state.studioSection != .learn {
                     Button { state.studioSection = .learn } label: { Image(systemName: "graduationcap") }
                         .accessibilityLabel("Volver a la práctica")
                 }
+            }
+            if let hint = state.connectionHint {
+                Label(hint, systemImage: "arrow.triangle.branch").font(.caption).foregroundStyle(.cyan)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if state.hasPendingTimingChanges {
                 Button { showsOrder = true } label: {
@@ -100,8 +125,13 @@ struct StudioConsoleView: View {
             if let problem = state.audioProblem {
                 Label(problem, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-            } else if let message = state.statusMessage {
-                Text(message).font(.caption2).foregroundStyle(.secondary).lineLimit(2).help(message)
+            }
+            if let problem = state.recoveryProblem {
+                Label(problem, systemImage: "externaldrive.badge.exclamationmark").font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let message = state.statusMessage {
+                Text(message).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 22).padding(.vertical, 14)
@@ -113,10 +143,11 @@ struct StudioConsoleView: View {
         VStack(alignment: .leading, spacing: 20) {
             StudioHeading(eyebrow: "Tu sesión", title: "Dale forma al sonido",
                           detail: "Mueve, afina y transforma tus sonidos mientras la música sigue.")
-            HStack(spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145))], spacing: 10) {
                 metric("SONIDOS", value: "\(state.nodes.count)", icon: "waveform")
-                metric("ACTIVOS", value: "\(state.nodes.filter(\.isActive).count)", icon: "speaker.wave.2")
-                metric("CONEXIONES", value: "\(state.connections.count)", icon: "arrow.triangle.branch")
+                metric("CON RUTA", value: "\(state.nodes.count - state.unreachableNodeIDs().count)", icon: "arrow.triangle.branch")
+                metric("HABILITADOS", value: "\(state.nodes.filter { $0.isActive && $0.volume > 0 }.count)", icon: "speaker.wave.2")
+                metric("SILENCIADOS", value: "\(state.nodes.filter { !$0.isActive || $0.volume == 0 }.count)", icon: "speaker.slash")
             }
             if state.nodes.isEmpty {
                 StudioCard {
@@ -138,9 +169,11 @@ struct StudioConsoleView: View {
                     }
                     HStack {
                         Text("Tempo").font(.callout)
-                        Slider(value: Binding(get: { state.sequencer.bpm }, set: { state.sequencer.bpm = $0 }), in: 50...180, step: 1)
+                        Slider(value: Binding(get: { state.sequencer.bpm }, set: { state.setTempo($0) }), in: 50...180, step: 1, onEditingChanged: { editing in
+                            if editing { state.beginParameterEdit("Cambiar tempo") } else { state.endParameterEdit() }
+                        })
                             .accessibilityLabel("Tempo en BPM").disabled(state.graphTransport.isPlaying)
-                        Text("\(Int(state.sequencer.bpm))").font(.callout.monospacedDigit()).frame(width: 34)
+                        Text("\(Int(state.sequencer.bpm))").font(.callout.monospacedDigit()).fixedSize()
                     }
                     if state.graphTransport.isPlaying {
                         Text("Tono, volumen y efectos responden en vivo. El tempo se ajusta con la pista detenida.")
@@ -148,7 +181,7 @@ struct StudioConsoleView: View {
                     }
                     DisclosureGroup("Ciclos del grafo") {
                         Stepper("Recorridos internos · \(state.graphTransport.loopPasses)×", value: Binding(
-                            get: { state.graphTransport.loopPasses }, set: { state.graphTransport.loopPasses = $0 }), in: 1...8)
+                            get: { state.graphTransport.loopPasses }, set: { state.setLoopPasses($0) }), in: 1...8)
                             .disabled(state.graphTransport.isPlaying)
                     }.font(.callout)
                     Button { showsOrder = true } label: {
@@ -172,7 +205,7 @@ struct StudioConsoleView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(node.name).font(.callout.bold())
-                                    Text(unreachable.contains(node.id) ? "Sin ruta desde Play" : node.id == state.playEntryNodeID ? "Entrada de Play" : node.type.character)
+                                    Text(nodeStatus(node, unreachable: unreachable))
                                         .font(.caption2).foregroundStyle(unreachable.contains(node.id) ? .orange : .secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -192,11 +225,42 @@ struct StudioConsoleView: View {
         }
     }
 
+    private func nodeStatus(_ node: SoundNode, unreachable: Set<UUID>) -> String {
+        let route = unreachable.contains(node.id) ? "Sin ruta desde Play" : node.id == state.playEntryNodeID ? "Entrada de Play" : "Con ruta desde Play"
+        return route + (!node.isActive ? " · Silenciado" : node.volume == 0 ? " · Volumen 0 %" : " · Habilitado")
+    }
+
+    private var quickStart: some View {
+        StudioCard {
+            HStack {
+                Label("Primeros pasos · \(min(state.onboardingProgress + 1, 3))/3", systemImage: "hand.draw")
+                    .font(.callout.bold())
+                Spacer()
+                Button { guideDismissed = true } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                    .buttonStyle(.borderless).accessibilityLabel("Ocultar guía inicial")
+            }
+            let titles = ["Añade tu primer sonido", "Conecta una segunda idea", "Escucha tu composición", "Tu composición ya tiene vida"]
+            let details = ["Abre Sonidos y elige un timbre. Será la única entrada desde Play.",
+                "Añade otro sonido y une el punto luminoso del primero con él. También puedes usar Nodo → Añadir salida.",
+                "Pulsa Reproducir. Mueve un sonido para cambiar su nota y usa los diales para transformarlo.",
+                "Puedes seguir añadiendo ramas, editar mientras suena y deshacer tus ajustes."]
+            Text(titles[state.onboardingProgress]).font(.headline)
+            Text(details[state.onboardingProgress]).font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ProgressView(value: Double(state.onboardingProgress), total: 3)
+            if state.onboardingProgress == 0 {
+                Button("Elegir sonido") { state.studioSection = .sounds }.buttonStyle(.bordered)
+            } else if state.onboardingProgress == 3 {
+                Button("Entendido") { guideDismissed = true }.buttonStyle(.bordered)
+            }
+        }
+    }
+
     private func metric(_ title: String, value: String, icon: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: icon).foregroundStyle(.cyan)
             Text(value).font(.system(.title2, design: .rounded).bold().monospacedDigit())
-            Text(title).font(.system(size: 11, weight: .bold)).tracking(0.6).foregroundStyle(.secondary)
+            Text(title).font(.caption2.bold()).tracking(0.6).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
         .background(.white.opacity(0.035), in: .rect(cornerRadius: 18))
@@ -207,7 +271,9 @@ struct StudioConsoleView: View {
             StudioHeading(eyebrow: "Inspector", title: "Cada sonido, a tu medida", detail: "Añade un sonido para controlar su afinación, volumen y efectos.")
             Button("Elegir un sonido") { state.studioSection = .sounds }.buttonStyle(.borderedProminent)
         } else {
-            Picker("Sonido seleccionado", selection: $state.selectedNodeID) {
+            Picker("Sonido seleccionado", selection: Binding(get: { state.selectedNodeID }, set: { id in
+                if let id { state.focusNode(id: id) } else { state.clearSelection() }
+            })) {
                 Text("Selecciona un sonido").tag(nil as UUID?)
                 ForEach(state.nodes) { node in Text(node.name).tag(Optional(node.id)) }
             }.pickerStyle(.menu)
@@ -254,7 +320,9 @@ struct StudioConsoleView: View {
         VStack(spacing: 4) {
             HStack { Text(title); Spacer(); Text("\(value, specifier: "%+.2f") m").monospacedDigit() }
                 .font(.caption).foregroundStyle(.secondary)
-            Slider(value: Binding(get: { value }, set: { set($0) }), in: range).accessibilityLabel(title)
+            Slider(value: Binding(get: { value }, set: { set($0) }), in: range, onEditingChanged: { editing in
+                if editing { state.beginParameterEdit("Mover sonido") } else { state.endParameterEdit() }
+            }).accessibilityLabel(title)
         }.padding(.top, 10)
     }
 
@@ -306,7 +374,7 @@ struct SoundMixerControls: View {
             }
             control("Volumen", icon: "speaker.wave.2", parameter: .volume, value: node.volume)
             Divider().overlay(.white.opacity(0.08))
-            HStack { Text("EFECTOS").font(.caption2.bold()).tracking(1.5); Spacer(); Text("EDICIÓN EN VIVO").font(.system(size: 11, weight: .bold)).foregroundStyle(.cyan) }
+            HStack { Text("EFECTOS").font(.caption2.bold()).tracking(1.5); Spacer(); Text("EDICIÓN EN VIVO").font(.caption2.bold()).foregroundStyle(.cyan) }
                 .foregroundStyle(.secondary)
             control("Reverb", icon: "sparkles", parameter: .reverb, value: node.reverb)
             control("Delay", icon: "repeat", parameter: .delay, value: node.delay)
@@ -329,7 +397,7 @@ struct SoundMixerControls: View {
                 Text("\(Int(value * 100)) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             Slider(value: Binding(get: { value }, set: { state.setSoundParameter(id: node.id, parameter: parameter, value: $0) }),
-                   in: 0...1, onEditingChanged: { if $0 { state.beginParameterEdit() } })
+                   in: 0...1, onEditingChanged: { if $0 { state.beginParameterEdit("Ajustar \(title)") } else { state.endParameterEdit() } })
                 .accessibilityLabel(title)
         }
     }

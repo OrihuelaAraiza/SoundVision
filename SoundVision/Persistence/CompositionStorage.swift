@@ -33,6 +33,10 @@ struct CompositionStorage {
         return try JSONDecoder().decode(Composition.self, from: Data(contentsOf: source))
     }
 
+    func recoveryStorage() throws -> RecoveryStorage {
+        RecoveryStorage(url: try fileURL().deletingPathExtension().appendingPathExtension("recovery.json"))
+    }
+
     private func fileURL() throws -> URL {
         if let customURL { return customURL }
         let directory = try fileManager.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)

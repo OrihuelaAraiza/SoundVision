@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 
 /// Define la personalidad visual y cinética de cada familia sonora.
+@MainActor
 struct NodeVisualStyle {
     let color: UIColor
     let baseScale: Float

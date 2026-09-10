@@ -7,6 +7,7 @@ import RealityKit
 /// como un parpadeo y no como sonido emitido. Ahora cada ataque lanza una onda
 /// que se expande y se desvanece, y varias pueden convivir: en un pasaje rápido
 /// se ven salir una tras otra, que es lo que hace el sonido de verdad.
+@MainActor
 enum WaveformVisualizer {
     /// Cuántas ondas pueden estar en el aire a la vez. Con notas cortas y
     /// seguidas hacen falta varias; más allá de esto se solapan sin aportar.

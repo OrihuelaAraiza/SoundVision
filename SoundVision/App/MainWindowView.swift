@@ -8,6 +8,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var state: CompositionState
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isTransitioning = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -18,6 +19,10 @@ struct MainWindowView: View {
             } else {
                 launcher
             }
+        }
+        .onDisappear { state.endParameterEdit(); state.flushRecovery() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { state.endParameterEdit(); state.flushRecovery() }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: state.isImmersiveSpaceOpen)
     }
@@ -39,6 +44,12 @@ struct MainWindowView: View {
                 }.font(.caption).foregroundStyle(.secondary)
 
                 VStack(spacing: 12) {
+                    if state.recoveryAvailable {
+                        Button { Task { await start { state.restoreRecoveredSession() } } } label: {
+                            Label("Recuperar mi última sesión", systemImage: "clock.arrow.circlepath")
+                                .frame(maxWidth: .infinity, minHeight: 38)
+                        }.buttonStyle(.borderedProminent).tint(StudioDesign.accent)
+                    }
                     if !state.nodes.isEmpty {
                         Button { Task { await start {} } } label: {
                             Label("Continuar mi composición", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 38)
@@ -63,7 +74,7 @@ struct MainWindowView: View {
                     }.buttonStyle(.borderless)
                 }
                 .disabled(isTransitioning)
-                .lineLimit(1).minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
                 if isTransitioning {
                     ProgressView("Preparando tu espacio…").font(.caption)
                 } else if let message = state.statusMessage {
@@ -97,6 +108,8 @@ struct MainWindowView: View {
 
     @MainActor
     private func closeStudio() async {
+        state.endParameterEdit()
+        state.flushRecovery()
         state.stopPlayback()
         await dismissImmersiveSpace()
         state.isImmersiveSpaceOpen = false

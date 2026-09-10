@@ -3,6 +3,7 @@ import UIKit
 
 /// Paleta única del laboratorio. Mantenerla aquí evita que cada entidad invente
 /// su propio lenguaje de color, brillo y transparencia.
+@MainActor
 enum SoundVisionMaterials {
     static func nodeSurface(for type: SoundNodeType, isActive: Bool, isTriggered: Bool = false) -> RealityKit.Material {
         let accent = NodeVisualStyle.style(for: type).color

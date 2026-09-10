@@ -170,9 +170,10 @@ final class AudioEngineManager: ObservableObject {
 
     /// Reparte la línea de tiempo entre las voces vivas. Sin reenganches, sin
     /// reservas en el camino crítico: cada voz recibe sus instantes de ataque.
-    func publish(session: SpatialAudioSession?) {
+    @discardableResult
+    func publish(session: SpatialAudioSession?) -> TimeInterval? {
         guard let session else {
-            guard publishedSessionID != nil else { return }
+            guard publishedSessionID != nil else { return nil }
             let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
             for nodeID in Array(voices.keys) {
                 guard var voice = voices[nodeID] else { continue }
@@ -183,18 +184,22 @@ final class AudioEngineManager: ObservableObject {
             publishedSessionID = nil
             publishedStartSeconds = nil
             scheduledVoiceIDs = []
-            return
+            return nil
         }
 
         guard prepare() else {
             voices.values.forEach { $0.renderer.schedule.clear() }
-            return
+            return nil
+        }
+        guard !voices.isEmpty else {
+            attachFailure = "Preparando los sonidos. Vuelve a pulsar Reproducir."
+            return nil
         }
         secondsPerBeat = session.secondsPerBeat
         // Arrastrar/rotar solo cambia parámetros: no reagrupar 512 ataques en
         // cada frame de UI si todas las voces ya tienen su agenda.
         if publishedSessionID == session.id,
-           voices.values.allSatisfy({ $0.publishedSessionID == session.id }) { return }
+           voices.values.allSatisfy({ $0.publishedSessionID == session.id }) { return publishedStartSeconds }
 
         let isNewSession = session.id != publishedSessionID
         publishedSessionID = session.id
@@ -208,7 +213,7 @@ final class AudioEngineManager: ObservableObject {
         let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
         let start: Double
         if isNewSession || publishedStartSeconds == nil {
-            start = max(AVAudioTime.seconds(forHostTime: session.startHostTime), now + 0.06)
+            start = PlaybackClock.effectiveStart(requested: PlaybackClock.seconds(forHostTime: session.startHostTime), now: now)
             publishedStartSeconds = start
         } else {
             start = publishedStartSeconds ?? now + 0.06
@@ -238,6 +243,7 @@ final class AudioEngineManager: ObservableObject {
             voice.publishedSessionID = session.id
             voices[nodeID] = voice
         }
+        return start
     }
 
     /// Empuja a las voces vivas lo que la mano acaba de cambiar. Es lo que hace
@@ -248,7 +254,8 @@ final class AudioEngineManager: ObservableObject {
         for node in nodes {
             guard var voice = voices[node.id] else { continue }
 
-            // Volumen y reverb los aplica RealityKit, no el sintetizador.
+            // RealityKit aplica la reverb y la atenuación espacial; el generador
+            // aplica el volumen suavizado, incluido el silencio exacto.
             // Reescribir el componente en cada pasada costaba trabajo inútil en
             // el hilo principal: solo se toca cuando el valor cambia de verdad.
             let gain = spatialGain(for: node)
@@ -350,7 +357,9 @@ final class AudioEngineManager: ObservableObject {
     }
 
     private func spatialGain(for node: SoundNode) -> Double {
-        max(-24, min(20 * log10(max(0.05, Double(node.volume))), 0))
+        // The renderer applies the full smoothed 0...1 amplitude, including zero.
+        // RealityKit keeps distance attenuation and spatial reverb only.
+        0
     }
 
     private func spatialReverb(for node: SoundNode) -> Double {

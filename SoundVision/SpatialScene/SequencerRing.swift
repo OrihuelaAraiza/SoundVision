@@ -9,6 +9,7 @@ struct SequencerRingConfig {
     static let soundVision = SequencerRingConfig(radius: 0.79, height: 1.25, totalSteps: 16, markerSize: 0.035)
 }
 
+@MainActor
 enum SequencerRing {
     static func make(config: SequencerRingConfig = .soundVision) -> Entity {
         let root = Entity()

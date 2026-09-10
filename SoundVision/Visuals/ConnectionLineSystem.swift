@@ -1,5 +1,6 @@
 import Foundation
 import RealityKit
+import UIKit
 
 /// Datos que la línea necesita para poder resaltarse sin volver a consultar la
 /// composición. Permite que los destellos de reproducción se apliquen directo a
@@ -8,8 +9,10 @@ struct ConnectionLineComponent: Component {
     var destinationID: UUID
     var type: SoundNodeType
     var isHighlighted: Bool
+    var isMuted: Bool = false
 }
 
+@MainActor
 enum ConnectionLineSystem {
     static let containerName = "energy-connections"
     static let prefix = "connection-"
@@ -24,17 +27,18 @@ enum ConnectionLineSystem {
         in root: Entity,
         nodes: [SoundNode],
         connections: [SoundConnection],
-        triggeredIDs: Set<UUID>
+        triggeredIDs: Set<UUID>,
+        selectedNodeID: UUID? = nil
     ) {
         guard let container = root.findEntity(named: containerName) else { return }
-        let revision = revision(nodes: nodes, connections: connections)
+        let revision = revision(nodes: nodes, connections: connections, selectedNodeID: selectedNodeID)
         guard container.components[ConnectionRevisionComponent.self]?.value != revision else { return }
         container.components.set(ConnectionRevisionComponent(value: revision))
 
         let nodeMap = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let validNames = Set(connections.map { prefix + $0.id.uuidString })
+        let validNames = Set(connections.flatMap { [prefix + $0.id.uuidString, "marker-" + $0.id.uuidString] })
 
-        for stale in container.children where stale.name.hasPrefix(prefix) && !validNames.contains(stale.name) {
+        for stale in Array(container.children) where !validNames.contains(stale.name) {
             stale.removeFromParent()
         }
 
@@ -71,12 +75,19 @@ enum ConnectionLineSystem {
             line.orientation = SpatialSceneLayout.segmentOrientation(from: sourcePosition, to: destinationPosition)
             let thickness: Float = line.components[ConnectionLineComponent.self]?.isHighlighted == true ? 1.8 : 1
             line.scale = [thickness, length, thickness]
-            line.isEnabled = destination.isActive
+            line.isEnabled = true
             if line.components[ConnectionLineComponent.self] == nil {
                 line.components.set(ConnectionLineComponent(destinationID: destination.id,
                     type: destination.type, isHighlighted: false))
             }
+            var info = line.components[ConnectionLineComponent.self]!
+            info.isMuted = !destination.isActive || destination.volume == 0
+            line.components.set(info)
+            line.model?.materials = [material(for: info)]
             setHighlight(triggeredIDs.contains(destination.id), on: line)
+            synchronizeMarker(in: container, edge: connection, from: sourcePosition, to: destinationPosition,
+                showTime: connection.sourceNodeID == selectedNodeID && selectedNodeID != nil,
+                muted: info.isMuted, destinationName: destination.name)
         }
     }
 
@@ -113,6 +124,9 @@ enum ConnectionLineSystem {
             line.position = (source + destination) / 2
             line.orientation = SpatialSceneLayout.segmentOrientation(from: source, to: destination)
             line.scale = [thickness, length, thickness]
+            if let marker = container.findEntity(named: "marker-" + connection.id.uuidString) {
+                positionMarker(marker, from: source, to: destination)
+            }
         }
     }
 
@@ -137,7 +151,60 @@ enum ConnectionLineSystem {
 
         let thickness: Float = highlighted ? 1.8 : 1
         line.scale = [thickness, line.scale.y, thickness]
-        line.model?.materials = [SoundVisionMaterials.connection(for: info.type, highlighted: highlighted)]
+        line.model?.materials = [material(for: info)]
+    }
+
+    private static func material(for info: ConnectionLineComponent) -> RealityKit.Material {
+        info.isMuted ? UnlitMaterial(color: UIColor.white.withAlphaComponent(0.3))
+            : SoundVisionMaterials.connection(for: info.type, highlighted: info.isHighlighted)
+    }
+
+    private static func synchronizeMarker(in container: Entity, edge: SoundConnection,
+                                         from: SIMD3<Float>, to: SIMD3<Float>, showTime: Bool,
+                                         muted: Bool, destinationName: String) {
+        let name = "marker-" + edge.id.uuidString
+        let marker: Entity
+        if let existing = container.findEntity(named: name) { marker = existing }
+        else {
+            marker = Entity()
+            marker.name = name
+            let arrow = ModelEntity(mesh: .generateCone(height: 0.07, radius: 0.026),
+                materials: [UnlitMaterial(color: .white)])
+            arrow.name = "direction"
+            marker.addChild(arrow)
+            let label = ModelEntity()
+            label.name = "timing"
+            label.components.set(BillboardComponent())
+            label.position = [0, 0.07, 0]
+            marker.addChild(label)
+            container.addChild(marker)
+        }
+        positionMarker(marker, from: from, to: to)
+        (marker.findEntity(named: "direction") as? ModelEntity)?.model?.materials = [
+            UnlitMaterial(color: muted ? .white.withAlphaComponent(0.35) : .systemCyan)
+        ]
+        if let label = marker.findEntity(named: "timing") as? ModelEntity {
+            label.isEnabled = showTime
+            let text = String(format: "+%.2f beats · %@", edge.durationBeats, edge.usesSpatialTiming ? "Espacial" : "Fijo")
+            if showTime, label.components[ConnectionLabelComponent.self]?.text != text {
+                label.model = ModelComponent(mesh: .generateText(text, extrusionDepth: 0.0002,
+                    font: .systemFont(ofSize: 0.026, weight: .semibold),
+                    containerFrame: CGRect(x: -0.28, y: 0, width: 0.56, height: 0.09),
+                    alignment: .center, lineBreakMode: .byWordWrapping),
+                    materials: [UnlitMaterial(color: .white)])
+                label.components.set(ConnectionLabelComponent(text: text))
+            }
+        }
+        var accessibility = AccessibilityComponent()
+        accessibility.isAccessibilityElement = true
+        accessibility.label = "Hacia \(destinationName)"
+        accessibility.value = "\(edge.durationBeats) beats\(muted ? ", sonido silenciado" : "")"
+        marker.components.set(accessibility)
+    }
+
+    private static func positionMarker(_ marker: Entity, from: SIMD3<Float>, to: SIMD3<Float>) {
+        marker.position = from + (to - from) * 0.62
+        marker.findEntity(named: "direction")?.orientation = SpatialSceneLayout.segmentOrientation(from: from, to: to)
     }
 
     /// Identifica la conexión tocada, subiendo por la jerarquía como hacen los
@@ -160,19 +227,23 @@ enum ConnectionLineSystem {
 
     /// Solo geometría y pertenencia. Los destellos quedan fuera a propósito:
     /// entraban en el hash y obligaban a rehacer este cálculo en cada nota.
-    private static func revision(nodes: [SoundNode], connections: [SoundConnection]) -> Int {
+    private static func revision(nodes: [SoundNode], connections: [SoundConnection], selectedNodeID: UUID?) -> Int {
         var hasher = Hasher()
+        hasher.combine(selectedNodeID)
         for node in nodes {
             hasher.combine(node.id)
             hasher.combine(node.positionX)
             hasher.combine(node.positionY)
             hasher.combine(node.positionZ)
             hasher.combine(node.isActive)
+            hasher.combine(node.volume == 0)
         }
         for connection in connections {
             hasher.combine(connection.id)
             hasher.combine(connection.sourceNodeID)
             hasher.combine(connection.destinationNodeID)
+            hasher.combine(connection.durationBeats)
+            hasher.combine(connection.usesSpatialTiming)
         }
         return hasher.finalize()
     }
@@ -181,3 +252,5 @@ enum ConnectionLineSystem {
 private struct ConnectionRevisionComponent: Component {
     var value: Int
 }
+
+private struct ConnectionLabelComponent: Component { var text: String }

@@ -1,6 +1,7 @@
 import Foundation
 import RealityKit
 
+@MainActor
 enum PulseIndicator {
     static func make() -> Entity {
         let root = Entity()

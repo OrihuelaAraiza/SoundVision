@@ -5,6 +5,7 @@ import UIKit
 /// Partículas de bajo costo que refuerzan estados musicales concretos.
 /// El atlas usa fondo negro y mezcla aditiva, por lo que no necesita un canal
 /// alpha perfecto para conservar el halo luminoso en un entorno inmersivo.
+@MainActor
 enum ParticleEffectSystem {
     static let nodeEmitterName = "node-energy-particles"
     static let coreEmitterName = "core-energy-particles"
@@ -83,9 +84,11 @@ enum ParticleEffectSystem {
         return entity
     }
 
-    static func updateNode(in root: Entity, isSelected: Bool, isTriggered: Bool, isActive: Bool) {
+    static func updateNode(in root: Entity, isSelected: Bool, isTriggered: Bool, isActive: Bool, reduceMotion: Bool = false) {
         guard let emitter = root.findEntity(named: nodeEmitterName),
               var component = emitter.components[ParticleEmitterComponent.self] else { return }
+        emitter.isEnabled = !reduceMotion
+        guard !reduceMotion else { return }
         let isEmitting = isActive && (isSelected || isTriggered)
         let birthRate: Float = isTriggered ? 10 : (isSelected ? 2 : 0)
         let size: Float = isTriggered ? 0.064 : 0.04
@@ -101,9 +104,11 @@ enum ParticleEffectSystem {
         emitter.components.set(component)
     }
 
-    static func updateCore(in root: Entity, isPlaying: Bool, triggeredCount: Int) {
+    static func updateCore(in root: Entity, isPlaying: Bool, triggeredCount: Int, reduceMotion: Bool = false) {
         guard let emitter = root.findEntity(named: coreEmitterName),
               var component = emitter.components[ParticleEmitterComponent.self] else { return }
+        emitter.isEnabled = !reduceMotion
+        guard !reduceMotion else { return }
         let birthRate: Float = isPlaying ? min(14, 6 + Float(triggeredCount * 2)) : 1.5
         let size: Float = isPlaying ? 0.064 : 0.045
         let angularSpeed: Float = isPlaying ? 0.9 : 0.24

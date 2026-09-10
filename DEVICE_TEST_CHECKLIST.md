@@ -1,5 +1,24 @@
 # Prueba física de SoundVision
 
+## Gizmo de efectos en los nodos
+
+- [ ] Seleccionar un nodo con pinch: aparecen Reverb, Delay, Distorsión y
+      Volumen, cada uno con nombre, color, arco de nivel y porcentaje.
+- [ ] Agarrar cada pomo sin desplazarlo: no debe saltar el valor. Arrastrar arriba
+      aumenta y abajo reduce. Probar 0 %, 100 % y volver desde ambos extremos.
+- [ ] Durante Play, variar cada efecto y escuchar el cambio sin reiniciar el
+      patrón ni cambiar los otros efectos, la posición, afinación o conexiones.
+- [ ] Soltar entre dos porcentajes y comprobar que el mezclador y el gizmo
+      coinciden. Un solo Deshacer debe recuperar el valor anterior al arrastre.
+- [ ] Cambiar un efecto desde el mezclador: su dial espacial se actualiza.
+      Guardar/cargar y comprobar que ambos controles conservan el mismo valor.
+- [ ] Girar el organismo: los diales permanecen legibles y su valor se actualiza.
+      Mover el cuerpo: el gizmo lo acompaña. Tirar del conector: sigue creando hilos.
+- [ ] Tocar de nuevo el cuerpo o seleccionar otro: desaparecen los controles del
+      anterior. Borrar el nodo durante una edición no debe afectar a otro sonido.
+- [ ] Probar Pad, Lead y un nodo muteado, con el sonido fijo y con varias ramas
+      reproduciéndose. Revisar separación, alcance de la pinza y fluidez con el visor.
+
 ## Regresión: ramas, reconexión y separación de Play
 
 - [ ] Abrir **Crear una composición**: Play queda a la izquierda de la ventana.
@@ -261,3 +280,37 @@ La prueba es satisfactoria si:
 - [ ] Revisar portada, biblioteca, mezclador y prácticas en una ventana pequeña,
       con texto ampliado y con 24–32 nodos. Confirmar lectura, scroll y respuesta
       de sliders/gestos; la compilación por sí sola no valida su fluidez.
+
+
+## Fiabilidad, recuperación y comodidad · 10 septiembre 2026
+
+- [ ] Crear → mover → Deshacer → Rehacer: conservar el mismo nodo y restaurar
+      posición, afinación, volumen y tiempos. Repetir con giro y cuatro diales.
+      Tocar sin modificar no consume historial. Cancelar un gesto también debe
+      dejar el último valor coherente y un solo paso de historial.
+- [ ] Silencio, sonido fijo, tempo y ciclos tienen Deshacer/Rehacer; ajustes
+      sonoros conservan Play. Una edición nueva invalida Rehacer.
+- [ ] Añadir 8, 16 y 32 organismos; revisar separación, acceso al conector y
+      lectura de los cuatro diales. Borrar y añadir de nuevo sin superponer cuerpos.
+- [ ] Llevar Volumen a 0 % durante Play: oír silencio; subirlo sin reiniciar el
+      recorrido. Repetir con silencio activado: subir volumen no debe desmutear.
+- [ ] Crear dos ataques del mismo nodo separados por ¼ beat a 180 BPM: comprobar
+      dos ondas. Repetir Play/Stop y observar el primer ataque tras una carga lenta.
+- [ ] Cambiar una salida a tiempo fijo, abrir Orden y mover el nodo: comparar
+      En reproducción y Próximo Play; al reiniciar se aplica el nuevo recorrido.
+- [ ] Silenciar un nodo intermedio: conexión atenuada visible y ruta conservada.
+      Seleccionar el origen para ver tiempos; cambiar selección para ocultarlos.
+- [ ] Trazar desde una rama libre hacia una alcanzable: el mensaje debe anticipar
+      la dirección efectiva. Probar duplicados y Play ocupado.
+- [ ] Esperar el estado Sesión recuperable, cerrar el proceso y volver a abrir:
+      recuperar nodos, tiempos e historial. Repetir dentro de una práctica, salir
+      de ella y comprobar que vuelve la composición original. El guardado manual
+      conserva la versión elegida explícitamente.
+- [ ] Completar y ocultar la guía; volver a abrirla desde el menú. Provocar una
+      nota incorrecta en una práctica y usar Ir a este sonido para corregirla.
+- [ ] Ventana pequeña y texto ampliado: revisar encabezado, biblioteca, transporte,
+      inspector y mensajes. Con Reducir movimiento, comprobar selección visible,
+      ausencia de ondas/partículas/flotación y controles de efecto operativos.
+- [ ] En Instruments → RealityKit Trace, registrar interacción y Play con 8, 16
+      y 32 nodos durante tres minutos. Anotar pausas, frames tardíos y consumo.
+      Validar localización, mezcla y comodidad en el Vision Pro físico.

@@ -64,8 +64,10 @@ enum MetalEnergyFieldSystem {
     }
 
     @MainActor
-    static func update(in transport: Entity, time: TimeInterval, isPlaying: Bool, triggeredCount: Int) {
+    static func update(in transport: Entity, time: TimeInterval, isPlaying: Bool, triggeredCount: Int, reduceMotion: Bool = false) {
         guard let entity = transport.findEntity(named: entityName) as? ModelEntity else { return }
+        entity.isEnabled = !reduceMotion
+        guard !reduceMotion else { return }
         entity.orientation = simd_quatf(angle: Float(time * (isPlaying ? 0.16 : 0.045)), axis: [0.15, 1, 0.1])
 
         let minimumInterval = isPlaying ? 1.0 / 20.0 : 1.0 / 3.0

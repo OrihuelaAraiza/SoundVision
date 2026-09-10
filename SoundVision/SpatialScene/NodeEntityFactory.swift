@@ -2,6 +2,7 @@ import Foundation
 import RealityKit
 import UIKit
 
+@MainActor
 enum NodeEntityFactory {
     static let nodePrefix = "sound-node-"
     static let connectorName = "node-connector"

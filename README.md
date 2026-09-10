@@ -31,13 +31,29 @@ una composición musical en un grafo 3D interactivo.
 
 ## Arquitectura de la interfaz
 
-El espacio inmersivo contiene **solo** la escultura sonora y sus gestos. Todos
-los controles viven en la ventana principal, que se convierte en la consola del
+El espacio inmersivo contiene la escultura sonora, sus gestos y el gizmo de
+efectos del nodo seleccionado. Los controles generales viven en la ventana principal, que se convierte en la consola del
 estudio al entrar. Es una ventana normal de visionOS: el sistema le da su barra
 de movimiento, la persona la coloca donde quiera y ahí se queda.
 
 Play aparece a la izquierda del eje central de la ventana, con espacio libre
 entre su zona de interacción y la consola al abrir el estudio.
+
+### Efectos directamente en el nodo
+
+Toca un organismo para mostrar cuatro diales alrededor de él: **Reverb**
+(violeta), **Delay** (cian), **Distorsión** (naranja) y **Volumen** (menta).
+Mantén una pinza en el pomo y arrastra arriba para aumentar o abajo para reducir;
+el arco y el porcentaje muestran el valor de 0 a 100 %. Agarrar un control
+conserva su valor inicial, y soltar confirma el ajuste exacto. Funciona durante
+Play y también con el sonido fijo; un solo **Deshacer** revierte cada arrastre.
+
+Solo el nodo seleccionado muestra el gizmo. Toca de nuevo su cuerpo para
+ocultarlo, o selecciona otro para trasladar los controles. Los diales siguen
+la posición del nodo y miran hacia la persona, pero no heredan sus giros ni los
+pulsos de escala. El cuerpo conserva su gesto de movimiento y el punto inferior
+conserva su gesto de conexión. Los valores siguen sincronizados con el mezclador
+y se guardan en la composición mediante el guardado habitual.
 
 Una versión anterior anclaba los paneles a la cabeza con `AnchorEntity(.head)`.
 Eso los volvía inusables —seguían el giro de la cabeza, así que nunca podías
@@ -222,9 +238,11 @@ tiene ahora un candado de **sonido fijo** en el inspector. Cerrado, moverlo solo
 lo recoloca —pitch, volumen y la duración de sus conexiones quedan congelados— y
 aparece un pedestal bajo el organismo para que se vea cuáles están fijos.
 
-Ninguna acción destructiva pide confirmación. En su lugar, la consola mantiene
-**Deshacer** disponible con el nombre de lo último que hiciste, así que cortar
-una conexión o vaciar el lienzo nunca es un callejón sin salida.
+La consola mantiene **Deshacer** y **Rehacer** con el nombre de la acción.
+Un arrastre completo cuenta como una sola edición; tocar sin cambiar un valor
+no consume historial. Posición, giro, efectos, volumen, silencio, candado, tempo
+y ciclos también tienen retorno. Deshacer/Rehacer ajustes sonoros conserva Play;
+los cambios de estructura detienen el recorrido.
 
 Si la consola te estorba, muévela con la barra inferior que le da visionOS o
 ciérrala; la escultura sigue funcionando.
@@ -275,8 +293,8 @@ La comprobación verifica la configuración musical, no que la persona haya oíd
 
 Al entrar se reserva en memoria la composición actual, tempo, ciclos, selección e
 historial. **Terminar** los recupera, incluso después de cambiar de lección. El
-progreso se guarda localmente con AppStorage. La reserva temporal dura la sesión;
-conviene guardar la composición antes de cerrar la app. Las prácticas no sobrescriben
+progreso se guarda localmente con AppStorage. La recuperación automática conserva la práctica y la composición original,
+incluido su historial, para poder continuar después de reiniciar la app. Las prácticas no sobrescriben
 el archivo de composición guardada.
 
 ## Validación del núcleo sin simulador
@@ -343,3 +361,37 @@ Validación actual, incluida la corrección de ramas y reconexión de Play:
   dentro de la pantalla simulada, por lo que no se completó la revisión del estudio.
 - Pendientes en Vision Pro: separación cómoda de Play y consola, gestos con las
   manos, mezcla espacial y fluidez. Usar `DEVICE_TEST_CHECKLIST.md`.
+
+
+## Fiabilidad y orientación · septiembre 2026
+
+- **Recuperación automática:** la app escribe `composition.recovery.json` después
+  de un segundo sin cambios y al terminar una edición o salir del estudio. El
+  guardado manual `composition.json` permanece independiente. Una copia
+  `.previous` permite volver a la última recuperación válida si el archivo actual
+  está incompleto. Al reiniciar, **Recuperar mi última sesión** restaura la sesión
+  detenida, incluida la práctica y la composición original. Los grafos que tenían
+  Play libre conservan esa decisión. Los fallos de escritura aparecen en consola.
+- **32 posiciones:** los sonidos nuevos se distribuyen con una búsqueda espacial
+  determinista y envolventes conservadoras por timbre. Las composiciones existentes
+  y las posiciones elegidas explícitamente no se reorganizan.
+- **Volumen real:** el generador aplica el volumen suavizado de 0 a 100 %. Cero
+  produce muestras nulas después de una rampa breve; subirlo conserva la agenda.
+  Silenciar sigue siendo independiente del volumen.
+- **Ataques visibles:** cada ataque emite su propio evento visual, aunque siga
+  iluminado el mismo nodo. Audio y transporte visual comparten el instante
+  efectivo de inicio que acepta el motor, también en la preescucha.
+- **Grafo legible:** silenciar atenúa la conexión; no la oculta. Las flechas muestran
+  su dirección y solo las salidas seleccionadas muestran el tiempo. El hilo
+  explica la dirección real o el motivo por el que no puede conectarse.
+- **Primeros pasos:** una guía descartable avanza al añadir, conectar y reproducir.
+  Puede abrirse de nuevo en el menú. Las prácticas indican qué nota, nodo o tiempo
+  necesita ajustarse y ofrecen ir directamente a ese sonido.
+- **Comodidad:** los textos de biblioteca pueden crecer; Reducir movimiento
+  mantiene selección y feedback de ataque, sin flotación, ondas ni partículas.
+
+`Scripts/validate-core.sh` ejecuta también regresiones de historial, distribución,
+recuperación, volumen cero, reloj compartido, ataques rápidos y orientación. Las
+pruebas RealityKit de `QualityRegressionTests` cubren geometría, conexiones,
+ondas y reducción de movimiento. Su compilación no sustituye su ejecución ni la
+prueba perceptual con el visor. Consulta `DEVICE_TEST_CHECKLIST.md` para esa sesión.

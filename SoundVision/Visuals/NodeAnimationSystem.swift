@@ -14,8 +14,9 @@ struct SoundNodeVisualComponent: Component, Equatable {
     var isTriggered: Bool
     var isConnectionSource: Bool
     var isSoundLocked: Bool
+    var reduceMotion: Bool
 
-    init(node: SoundNode, isSelected: Bool, isTriggered: Bool, isConnectionSource: Bool = false) {
+    init(node: SoundNode, isSelected: Bool, isTriggered: Bool, isConnectionSource: Bool = false, reduceMotion: Bool = false) {
         type = node.type
         position = [node.positionX, node.positionY, node.positionZ]
         rotation = [node.rotationX, node.rotationY, node.rotationZ]
@@ -24,6 +25,7 @@ struct SoundNodeVisualComponent: Component, Equatable {
         self.isTriggered = isTriggered
         self.isConnectionSource = isConnectionSource
         isSoundLocked = node.isSoundLocked
+        self.reduceMotion = reduceMotion
     }
 }
 
@@ -32,6 +34,7 @@ struct TransportVisualComponent: Component, Equatable {
     var isPlaying: Bool
     var activeCount: Int
     var triggeredCount: Int
+    var reduceMotion: Bool = false
 }
 
 /// Marca lo último que se envió a las mallas para no reconstruir materiales en
@@ -56,15 +59,27 @@ struct NodePartsComponent: Component {
 }
 
 /// Ondas vivas de un organismo. `-infinity` marca una ranura libre.
-private struct TriggerWaveComponent: Component {
+struct VisualAttackComponent: Component {
     var birthTimes = SIMD4<Double>(repeating: -.infinity)
     var nextSlot = 0
-    var wasTriggered = false
+    var sequence: UInt64 = 0
+}
+
+@MainActor
+enum VisualAttackFeedback {
+    static func emit(on entity: Entity, at time: TimeInterval) {
+        var attacks = entity.components[VisualAttackComponent.self] ?? VisualAttackComponent()
+        attacks.birthTimes[attacks.nextSlot] = time
+        attacks.nextSlot = (attacks.nextSlot + 1) % 4
+        attacks.sequence &+= 1
+        entity.components.set(attacks)
+    }
 }
 
 /// Anima los organismos sonoros a frame rate. Antes esta lógica colgaba de un
 /// `TimelineView` a 12–20 Hz, lo que se percibía como tartamudeo constante en
 /// Vision Pro; un `System` de RealityKit corre al ritmo del compositor.
+@MainActor
 struct NodeAnimationSystem: System {
     private static let query = EntityQuery(where: .has(SoundNodeVisualComponent.self))
 
@@ -74,14 +89,14 @@ struct NodeAnimationSystem: System {
         let time = CACurrentMediaTime()
         for entity in context.entities(matching: Self.query, updatingSystemWhen: .rendering) {
             guard let node = entity.components[SoundNodeVisualComponent.self] else { continue }
-            animate(entity, node: node, time: time)
+            Self.apply(to: entity, node: node, time: time)
         }
     }
 
-    private func animate(_ entity: Entity, node: SoundNodeVisualComponent, time: TimeInterval) {
+    static func apply(to entity: Entity, node: SoundNodeVisualComponent, time: TimeInterval) {
         let style = NodeVisualStyle.style(for: node.type)
         let typePhase = Double(SoundNodeType.allCases.firstIndex(of: node.type) ?? 0) * 0.73
-        let idle = node.isActive
+        let idle = node.isActive && !node.reduceMotion
             ? sin(time * Double(style.idleSpeed) + typePhase) * Double(style.idleAmplitude)
             : 0
 
@@ -90,14 +105,19 @@ struct NodeAnimationSystem: System {
             node.position.y + style.verticalOffset + Float(idle),
             node.position.z
         ]
-        let scale = node.isTriggered
+        let scale = node.isTriggered && !node.reduceMotion
             ? style.triggerScale
             : (node.isActive ? style.baseScale : style.baseScale * 0.78)
         entity.scale = SIMD3(repeating: scale)
 
-        let renderedState = NodeRenderedStateComponent(isActive: node.isActive, isTriggered: node.isTriggered)
+        var materialNode = node
+        if node.reduceMotion {
+            let births = entity.components[VisualAttackComponent.self]?.birthTimes ?? SIMD4(repeating: -.infinity)
+            materialNode.isTriggered = (0..<4).contains { time >= births[$0] && time - births[$0] < 0.06 }
+        }
+        let renderedState = NodeRenderedStateComponent(isActive: node.isActive, isTriggered: materialNode.isTriggered)
         if entity.components[NodeRenderedStateComponent.self] != renderedState {
-            updateMaterials(in: entity, node: node)
+            updateMaterials(in: entity, node: materialNode)
             entity.components.set(renderedState)
         }
         let parts = entity.components[NodePartsComponent.self] ?? NodePartsComponent()
@@ -107,18 +127,19 @@ struct NodeAnimationSystem: System {
             in: entity,
             isSelected: node.isSelected,
             isTriggered: node.isTriggered,
-            isActive: node.isActive
+            isActive: node.isActive,
+            reduceMotion: node.reduceMotion
         )
 
         if let halo = parts.halo {
             halo.isEnabled = node.isSelected
-            halo.scale = SIMD3(repeating: node.isSelected ? 1.08 + Float(sin(time * 2.4)) * 0.05 : 1)
+            halo.scale = SIMD3(repeating: node.isSelected ? 1.08 + (node.reduceMotion ? 0 : Float(sin(time * 2.4)) * 0.05) : 1)
         }
 
         // El conector late siempre un poco para invitar a tirar de él, y se
         // agranda mientras el hilo está en el aire.
         if let connector = parts.connector {
-            let pulse = 1 + Float(sin(time * 1.9)) * 0.09
+            let pulse: Float = node.reduceMotion ? 1 : 1 + Float(sin(time * 1.9)) * 0.09
             // Crece al seleccionar el organismo: una vez que ya lo elegiste,
             // tirar del hilo es lo siguiente que vas a querer hacer.
             let emphasis: Float = node.isConnectionSource ? 1.55 : (node.isSelected ? 1.3 : pulse)
@@ -128,34 +149,26 @@ struct NodeAnimationSystem: System {
         parts.soundLockPlinth?.isEnabled = node.isSoundLocked
     }
 
-    /// Cada ataque lanza una onda nueva en la siguiente ranura libre. Lo que
-    /// dispara es el **flanco**, no el estado: mientras el nodo sigue sonando no
-    /// deben brotar ondas sin parar.
-    private func updateWaves(
+    /// La agenda entrega cada ataque por separado. Las ondas leen sus fechas,
+    /// sin depender de que el estado de iluminación se apague entre dos notas.
+    private static func updateWaves(
         in entity: Entity,
         parts: NodePartsComponent,
         node: SoundNodeVisualComponent,
         style: NodeVisualStyle,
         time: TimeInterval
     ) {
-        var waves = entity.components[TriggerWaveComponent.self] ?? TriggerWaveComponent()
-
-        if node.isTriggered && !waves.wasTriggered {
-            waves.birthTimes[waves.nextSlot] = time
-            waves.nextSlot = (waves.nextSlot + 1) % WaveformVisualizer.concurrentWaves
+        let attacks = entity.components[VisualAttackComponent.self] ?? VisualAttackComponent()
+        if node.reduceMotion {
+            // Static bodies and selection remain legible; the material still marks attacks.
+            parts.waves.forEach { $0.isEnabled = false }
+        } else {
+            WaveformVisualizer.update(waves: parts.waves, style: style,
+                birthTimes: attacks.birthTimes, time: time)
         }
-        waves.wasTriggered = node.isTriggered
-        entity.components.set(waves)
-
-        WaveformVisualizer.update(
-            waves: parts.waves,
-            style: style,
-            birthTimes: waves.birthTimes,
-            time: time
-        )
     }
 
-    private func updateMaterials(in root: Entity, node: SoundNodeVisualComponent) {
+    private static func updateMaterials(in root: Entity, node: SoundNodeVisualComponent) {
         for child in root.children.compactMap({ $0 as? ModelEntity }) {
             if child.name.hasPrefix("node-core") {
                 child.model?.materials = [SoundVisionMaterials.nodeSurface(
@@ -171,7 +184,7 @@ struct NodeAnimationSystem: System {
         }
     }
 
-    private func updatePersonality(in root: Entity, node: SoundNodeVisualComponent, time: TimeInterval) {
+    private static func updatePersonality(in root: Entity, node: SoundNodeVisualComponent, time: TimeInterval) {
         let userRotation = simd_quatf(angle: node.rotation.y, axis: [0, 1, 0])
             * simd_quatf(angle: node.rotation.x, axis: [1, 0, 0])
             * simd_quatf(angle: node.rotation.z, axis: [0, 0, 1])
@@ -182,8 +195,9 @@ struct NodeAnimationSystem: System {
         case .kick, .bass, .tom, .subBass, .conga: Float(sin(time * 0.7)) * 0.014
         case .snare, .hiHat, .clap, .shaker, .marimba, .rimshot, .woodblock, .cowbell, .openHat: 0
         }
-        root.orientation = userRotation * simd_quatf(angle: idleAngle, axis: [0.25, 1, 0.15])
+        root.orientation = userRotation * simd_quatf(angle: node.reduceMotion ? 0 : idleAngle, axis: [0.25, 1, 0.15])
 
+        guard !node.reduceMotion else { return }
         switch node.type {
         case .clap:
             let gap: Float = node.isTriggered ? 0.035 : 0.072
@@ -205,6 +219,7 @@ struct NodeAnimationSystem: System {
 }
 
 /// Anima el núcleo Play y su campo Metal, también a frame rate.
+@MainActor
 struct TransportAnimationSystem: System {
     private static let query = EntityQuery(where: .has(TransportVisualComponent.self))
 
@@ -221,33 +236,35 @@ struct TransportAnimationSystem: System {
             ParticleEffectSystem.updateCore(
                 in: core,
                 isPlaying: state.isPlaying,
-                triggeredCount: state.triggeredCount
+                triggeredCount: state.triggeredCount,
+                reduceMotion: state.reduceMotion
             )
             MetalEnergyFieldSystem.update(
                 in: transport,
                 time: time,
                 isPlaying: state.isPlaying,
-                triggeredCount: state.triggeredCount
+                triggeredCount: state.triggeredCount,
+                reduceMotion: state.reduceMotion
             )
-            transport.scale = SIMD3(repeating: state.isPlaying ? 1.12 : 1)
+            transport.scale = SIMD3(repeating: state.isPlaying && !state.reduceMotion ? 1.12 : 1)
         }
     }
 
     private func animateCore(_ core: Entity, state: TransportVisualComponent, time: TimeInterval) {
         let activity = Float(state.activeCount) / 8
-        let breathing = Float(sin(time * 1.35)) * 0.035
+        let breathing: Float = state.reduceMotion ? 0 : Float(sin(time * 1.35)) * 0.035
         core.findEntity(named: "core-outer")?.scale = SIMD3(repeating: 1 + activity * 0.28 + breathing)
         core.findEntity(named: "core-heart")?.scale = SIMD3(
-            repeating: 0.9 + activity * 0.42 + Float(state.triggeredCount) * 0.16
+            repeating: 0.9 + activity * 0.42 + (state.reduceMotion ? 0 : Float(state.triggeredCount) * 0.16)
         )
 
         guard let shell = core.findEntity(named: "core-shell") as? ModelEntity else { return }
-        shell.scale = SIMD3(repeating: 1 + activity * 0.12 + (state.triggeredCount > 0 ? 0.16 : 0))
+        shell.scale = SIMD3(repeating: 1 + activity * 0.12 + (state.triggeredCount > 0 && !state.reduceMotion ? 0.16 : 0))
         let materialBand = min(4, state.activeCount / 2) + (state.triggeredCount > 0 ? 10 : 0)
         if core.components[CoreRenderedStateComponent.self]?.materialBand != materialBand {
             shell.model?.materials = [SoundVisionMaterials.core(intensity: 0.5 + activity * 0.5)]
             core.components.set(CoreRenderedStateComponent(materialBand: materialBand))
         }
-        shell.orientation = simd_quatf(angle: Float(time * 0.16), axis: [0.3, 1, 0.2])
+        shell.orientation = simd_quatf(angle: state.reduceMotion ? 0 : Float(time * 0.16), axis: [0.3, 1, 0.2])
     }
 }

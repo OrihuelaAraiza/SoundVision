@@ -18,6 +18,7 @@ final class LiveVoiceParameters: @unchecked Sendable {
         let delayAmount: Float
         let distortionAmount: Float
         let isMuted: Bool
+        let volume: Float
     }
 
     private let frequencyBits = Atomic<UInt64>(Double(440).bitPattern)
@@ -28,6 +29,7 @@ final class LiveVoiceParameters: @unchecked Sendable {
     /// la voz obligaría a volver a engancharla al desmutear, que es justo el
     /// trabajo que ya no queremos tener en el camino de Play.
     private let mutedValue = Atomic<UInt32>(0)
+    private let volumeBits = Atomic<UInt32>(Float(1).bitPattern)
 
     init(node: SoundNode, heldSeconds: Double) {
         update(from: node, heldSeconds: heldSeconds)
@@ -39,6 +41,7 @@ final class LiveVoiceParameters: @unchecked Sendable {
         delayBits.store(node.delay.bitPattern, ordering: .releasing)
         distortionBits.store(node.distortion.bitPattern, ordering: .releasing)
         mutedValue.store(node.isActive ? 0 : 1, ordering: .releasing)
+        volumeBits.store(max(0, min(node.volume.isFinite ? node.volume : 0, 1)).bitPattern, ordering: .releasing)
     }
 
     /// El render toma una sola fotografía por bloque. Además de eliminar carreras
@@ -50,7 +53,8 @@ final class LiveVoiceParameters: @unchecked Sendable {
             heldSeconds: Double(bitPattern: heldSecondsBits.load(ordering: .acquiring)),
             delayAmount: Float(bitPattern: delayBits.load(ordering: .acquiring)),
             distortionAmount: Float(bitPattern: distortionBits.load(ordering: .acquiring)),
-            isMuted: mutedValue.load(ordering: .acquiring) != 0
+            isMuted: mutedValue.load(ordering: .acquiring) != 0,
+            volume: Float(bitPattern: volumeBits.load(ordering: .acquiring))
         )
     }
 }
@@ -90,6 +94,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     private var smoothedDelay: Float = 0
     private var smoothedDrive: Float = 1
     private var smoothedMuteGain: Float = 1
+    private var smoothedVolume: Float = 1
     private var silentFrames = 0
     private var lastGeneration: UInt64 = .max
 
@@ -133,6 +138,7 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
     init(node: SoundNode, sustainSeconds: TimeInterval? = nil) {
         type = node.type
         smoothedMuteGain = node.isActive ? 1 : 0
+        smoothedVolume = max(0, min(node.volume, 1))
         spec = VoiceSynthesis.spec(for: node.type)
         seed = VoiceSynthesis.seed(for: node.type)
 
@@ -229,6 +235,8 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                 smoothedFrequency = targetFrequency
                 smoothedDelay = targetDelay
                 smoothedDrive = targetDrive
+                smoothedVolume = live.volume
+                smoothedMuteGain = live.isMuted ? 0 : 1
                 isSilence.pointee = ObjCBool(true)
                 return noErr
             }
@@ -273,7 +281,9 @@ final class SpatialVoiceRenderer: @unchecked Sendable {
                     // perciba solo como subir el volumen.
                     let shaped = VoiceSynthesis.softClip(wet, drive: smoothedDrive)
                     smoothedMuteGain += ((live.isMuted ? 0 : 1) - smoothedMuteGain) * 0.004
-                    let out = max(-0.85, min(shaped / (1 + (smoothedDrive - 1) * 0.35), 0.85)) * smoothedMuteGain
+                    smoothedVolume += (live.volume - smoothedVolume) * 0.004
+                    if live.volume == 0 && smoothedVolume < 0.00001 { smoothedVolume = 0 }
+                    let out = max(-0.85, min(shaped / (1 + (smoothedDrive - 1) * 0.35), 0.85)) * smoothedMuteGain * smoothedVolume
 
                     if out != 0 {
                         blockHadSignal = true

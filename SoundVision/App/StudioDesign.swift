@@ -67,6 +67,7 @@ struct InstrumentGlyph: View {
 struct SoundLibraryView: View {
     @EnvironmentObject private var state: CompositionState
     @AppStorage("soundvision.favoriteSounds") private var storedFavorites = ""
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var family: SoundFamily?
     @State private var search = ""
     @State private var onlyFavorites = false
@@ -104,14 +105,14 @@ struct SoundLibraryView: View {
             Picker("Familia", selection: $family) {
                 Text("Todos").tag(nil as SoundFamily?)
                 ForEach(SoundFamily.allCases, id: \.self) { Text($0.rawValue).tag(Optional($0)) }
-            }.pickerStyle(.segmented)
+            }.pickerStyle(.menu)
 
             if results.isEmpty {
                 ContentUnavailableView(onlyFavorites ? "Sin favoritos aquí" : "No encontramos ese sonido",
                     systemImage: onlyFavorites ? "star" : "magnifyingglass",
                     description: Text("Prueba otra familia o cambia la búsqueda."))
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 175), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 280 : 175), spacing: 12)], spacing: 12) {
                 ForEach(results, id: \.self) { type in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -135,8 +136,8 @@ struct SoundLibraryView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 7) {
                                 InstrumentGlyph(type: type).frame(height: 36)
-                                Text(SoundNodeType.displayName(for: type)).font(.callout.bold()).lineLimit(1).minimumScaleFactor(0.8)
-                                Text(type.character).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+                                Text(SoundNodeType.displayName(for: type)).font(.callout.bold()).fixedSize(horizontal: false, vertical: true)
+                                Text(type.character).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                                 HStack {
                                     Text("Añadir").font(.caption.weight(.semibold))
                                     Spacer()

@@ -1,5 +1,6 @@
 import RealityKit
 
+@MainActor
 enum TransportNodeFactory {
     static let rootName = "transport-play-node"
 

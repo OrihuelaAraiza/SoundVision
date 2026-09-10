@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import simd
 
-enum SoundParameter { case volume, reverb, delay, distortion }
+enum SoundParameter: String, CaseIterable, Sendable { case volume, reverb, delay, distortion }
 
 enum StudioSection: Hashable { case transport, sounds, node, learn }
 
@@ -17,8 +17,8 @@ final class CompositionState: ObservableObject {
     // collider de Play capture los gestos dirigidos a la consola.
     nonisolated static let playNodePosition = SIMD3<Float>(-1.05, SpatialParameterMapper.neutralHeight, -0.15)
 
-    @Published var nodes: [SoundNode]
-    @Published var connections: [SoundConnection]
+    @Published var nodes: [SoundNode] { didSet { contentDidChange() } }
+    @Published var connections: [SoundConnection] { didSet { contentDidChange() } }
     @Published var isImmersiveSpaceOpen = false
     /// Los destellos de reproducción **no** se publican. Cada nota provocaba una
     /// reevaluación completa de SwiftUI: con música sonando, la consola se
@@ -26,6 +26,9 @@ final class CompositionState: ObservableObject {
     /// Ahora viajan por este callback directo a las entidades de la escena.
     private(set) var soundingNodeIDs: Set<UUID> = []
     var onSoundingChanged: ((Set<UUID>) -> Void)?
+    var onVisualAttack: ((UUID) -> Void)?
+    /// Installed by the scene; tests and nonimmersive previews can use the transport clock.
+    var scheduleAudio: ((SpatialAudioSession) -> TimeInterval?)?
     @Published private(set) var hasPendingTimingChanges = false
     @Published var studioSection: StudioSection = .transport
     @Published var selectedNodeID: UUID?
@@ -35,9 +38,20 @@ final class CompositionState: ObservableObject {
     @Published var testStep = 0
     @Published private(set) var activeLesson: MusicLesson?
     @Published private(set) var lessonHasPlayed = false
-    private var learningBackup: (composition: Composition, selectedID: UUID?, undo: [UndoEntry], isDemo: Bool)?
+    private var learningBackup: (snapshot: CompositionEditSnapshot, history: CompositionHistory)?
     @Published private(set) var sceneContentRevision = 0
     @Published private(set) var undoLabel: String?
+    @Published private(set) var redoLabel: String?
+    @Published private(set) var recoveryAvailable = false
+    @Published private(set) var saveStatus = "Sin cambios"
+    @Published private(set) var recoveryProblem: String?
+    @Published var connectionHint: String?
+    @Published private(set) var onboardingProgress = 0
+    private var recovery: RecoveryCoordinator?
+    private var pendingRecovery: SessionRecovery?
+    private var hasSessionEdits = false
+    private var needsRecoveryWrite = false
+    private var isRestoring = false
     /// Solo tiene valor cuando el motor de audio tiene algo que reportar.
     @Published var audioProblem: String?
     /// Estado vivo del motor en una línea, para la pestaña Reproducir.
@@ -48,27 +62,98 @@ final class CompositionState: ObservableObject {
     private var pulseClearTasks: [UUID: Task<Void, Never>] = [:]
     private var previewClearTask: Task<Void, Never>?
     private var observations = Set<AnyCancellable>()
-    private var undoStack: [UndoEntry] = []
+    private var history = CompositionHistory()
 
-    private struct UndoEntry {
-        let label: String
-        let nodes: [SoundNode]
-        let connections: [SoundConnection]
-        let selectedNodeID: UUID?
-        let isSpatialTestScene: Bool
-        let bpm: Double
-        let loopPasses: Int
-    }
-
-    init(storage: CompositionStorage = CompositionStorage()) {
+    init(storage: CompositionStorage = CompositionStorage(), enableRecovery: Bool = false) {
         self.storage = storage
         nodes = []
         connections = []
-
+        if enableRecovery {
+            do {
+                let coordinator = RecoveryCoordinator(storage: try storage.recoveryStorage())
+                recovery = coordinator
+                pendingRecovery = coordinator.storage.load()
+                recoveryAvailable = pendingRecovery != nil
+            } catch {
+                recoveryProblem = "No se pudo preparar la recuperación: \(error.localizedDescription)"
+            }
+        }
         sequencer.objectWillChange
             .merge(with: graphTransport.objectWillChange)
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &observations)
+    }
+
+    private var editSnapshot: CompositionEditSnapshot {
+        CompositionEditSnapshot(nodes: nodes, connections: connections, selectedNodeID: selectedNodeID,
+            isSpatialTestScene: isSpatialTestScene, bpm: sequencer.bpm, loopPasses: graphTransport.loopPasses)
+    }
+
+    private func contentDidChange() {
+        guard !isRestoring else { return }
+        hasSessionEdits = true
+        needsRecoveryWrite = true
+        if recovery != nil { saveStatus = "Cambios pendientes" }
+        recovery?.schedule { [weak self] in self?.flushRecovery() }
+    }
+
+    func flushRecovery() {
+        guard hasSessionEdits, needsRecoveryWrite, let recovery else { return }
+        do {
+            try recovery.flush(SessionRecovery(version: 1, current: editSnapshot, history: history,
+                lesson: activeLesson, original: learningBackup?.snapshot,
+                originalHistory: learningBackup?.history, savedAt: Date()))
+            needsRecoveryWrite = false
+            saveStatus = "Sesión recuperable"
+            recoveryProblem = nil
+            pendingRecovery = nil
+            recoveryAvailable = false
+        } catch {
+            recoveryProblem = "No se pudo guardar la recuperación: \(error.localizedDescription). Usa Guardar composición."
+        }
+    }
+
+    func restoreRecoveredSession() {
+        guard let saved = pendingRecovery else { return }
+        stopPlayback()
+        isRestoring = true
+        apply(saved.current)
+        history = saved.history
+        // A process can end during a drag. Seal that transaction once, on recovery.
+        history.end(at: editSnapshot)
+        if let original = saved.original, let originalHistory = saved.originalHistory {
+            learningBackup = (original, originalHistory)
+        } else { learningBackup = nil }
+        activeLesson = saved.lesson
+        lessonHasPlayed = false
+        refreshHistoryLabels()
+        pendingRecovery = nil
+        recoveryAvailable = false
+        isRestoring = false
+        hasSessionEdits = true
+        needsRecoveryWrite = false
+        onboardingProgress = nodes.isEmpty ? 0 : connections.contains { $0.sourceNodeID != nil } ? 2 : 1
+        saveStatus = "Sesión recuperada"
+        statusMessage = "Recuperamos tu sesión. Pulsa Reproducir cuando estés listo."
+        studioSection = activeLesson == nil ? .transport : .learn
+    }
+
+    func setTempo(_ bpm: Double) {
+        guard !graphTransport.isPlaying, bpm.isFinite else { return }
+        let value = min(180, max(50, bpm.rounded()))
+        guard value != sequencer.bpm else { return }
+        recordUndo("Cambiar tempo")
+        sequencer.bpm = value
+        contentDidChange()
+    }
+
+    func setLoopPasses(_ count: Int) {
+        guard !graphTransport.isPlaying else { return }
+        let value = min(8, max(1, count))
+        guard value != graphTransport.loopPasses else { return }
+        recordUndo("Cambiar ciclos")
+        graphTransport.loopPasses = value
+        contentDidChange()
     }
 
     var selectedNode: SoundNode? {
@@ -82,6 +167,7 @@ final class CompositionState: ObservableObject {
     /// Tocar el nodo ya seleccionado lo suelta. Sin esto no había forma de
     /// quedarse sin selección desde dentro del espacio.
     func selectNode(id: UUID) {
+        endParameterEdit()
         selectedNodeID = selectedNodeID == id ? nil : id
     }
 
@@ -89,6 +175,7 @@ final class CompositionState: ObservableObject {
     /// Pasa por aquí y no por `selectedNodeID` a secas para que "seleccionado"
     /// y el inspector no puedan divergir según por dónde entres.
     func focusNode(id: UUID) {
+        if selectedNodeID != id { endParameterEdit() }
         selectedNodeID = id
     }
 
@@ -121,25 +208,54 @@ final class CompositionState: ObservableObject {
 
     // MARK: - Deshacer
 
-    var canUndo: Bool { !undoStack.isEmpty }
+    var canUndo: Bool {
+        !history.undo.isEmpty || history.transaction.map { !$0.snapshot.hasSameContent(as: editSnapshot) } == true
+    }
+    var canRedo: Bool {
+        !history.redo.isEmpty && history.transaction.map { $0.snapshot.hasSameContent(as: editSnapshot) } != false
+    }
 
-    /// Toda acción que destruye o crea estructura deja un punto de retorno, de
-    /// modo que ningún borrado necesita un diálogo de confirmación previo.
+    private func refreshHistoryLabels() {
+        undoLabel = history.transaction?.label ?? history.undo.last?.label
+        redoLabel = history.redo.last?.label
+    }
+
     private func recordUndo(_ label: String) {
-        undoStack.append(UndoEntry(
-            label: label,
-            nodes: nodes,
-            connections: connections,
-            selectedNodeID: selectedNodeID,
-            isSpatialTestScene: isSpatialTestScene,
-            bpm: sequencer.bpm, loopPasses: graphTransport.loopPasses
-        ))
-        if undoStack.count > 24 { undoStack.removeFirst() }
-        undoLabel = label
+        history.record(label, at: editSnapshot)
+        refreshHistoryLabels()
+    }
+
+    func beginParameterEdit(_ label: String = "Ajustar sonido") {
+        history.begin(label, at: editSnapshot)
+        refreshHistoryLabels()
+    }
+
+    func endParameterEdit() {
+        if let edit = history.transaction, !edit.snapshot.hasSameContent(as: editSnapshot) {
+            needsRecoveryWrite = true
+        }
+        history.end(at: editSnapshot)
+        refreshHistoryLabels()
+        flushRecovery()
     }
 
     func undo() {
-        guard let entry = undoStack.popLast() else { return }
+        guard let entry = history.takeUndo(at: editSnapshot) else { return }
+        apply(entry.snapshot)
+        refreshHistoryLabels()
+        statusMessage = "Se deshizo: \(entry.label.lowercased())."
+        flushRecovery()
+    }
+
+    func redo() {
+        guard let entry = history.takeRedo(at: editSnapshot) else { return }
+        apply(entry.snapshot)
+        refreshHistoryLabels()
+        statusMessage = "Se rehizo: \(entry.label.lowercased())."
+        flushRecovery()
+    }
+
+    private func apply(_ entry: CompositionEditSnapshot) {
         let sameNodes = nodes.count == entry.nodes.count && zip(nodes, entry.nodes).allSatisfy { $0.id == $1.id && $0.type == $1.type }
         let sameEdges = connections.count == entry.connections.count && zip(connections, entry.connections).allSatisfy {
             $0.id == $1.id && $0.sourceNodeID == $1.sourceNodeID && $0.destinationNodeID == $1.destinationNodeID
@@ -155,9 +271,7 @@ final class CompositionState: ObservableObject {
         connections = entry.connections
         selectedNodeID = entry.selectedNodeID
         isSpatialTestScene = entry.isSpatialTestScene
-        undoLabel = undoStack.last?.label
         sceneContentRevision &+= 1
-        statusMessage = "Se deshizo: \(entry.label.lowercased())."
     }
 
     func toggleSelectedNode() {
@@ -167,14 +281,17 @@ final class CompositionState: ObservableObject {
 
     func toggleNode(id: UUID) {
         guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("Cambiar silencio")
         nodes[index].isActive.toggle()
     }
 
     func clearSelection() {
+        endParameterEdit()
         selectedNodeID = nil
     }
 
     func deleteSelectedNode() {
+        endParameterEdit()
         guard let id = selectedNodeID, let node = node(id: id) else { return }
         recordUndo("Eliminar \(node.name)")
         stopPlayback()
@@ -186,6 +303,7 @@ final class CompositionState: ObservableObject {
     }
 
     func removeConnection(id: UUID) {
+        endParameterEdit()
         guard let index = connections.firstIndex(where: { $0.id == id }) else { return }
         recordUndo("Cortar conexión")
         let destinationID = connections[index].destinationNodeID
@@ -197,10 +315,12 @@ final class CompositionState: ObservableObject {
 
     @discardableResult
     func connect(sourceID: UUID?, destinationID: UUID) -> Bool {
+        endParameterEdit()
         guard canConnect(sourceID: sourceID, destinationID: destinationID) else { return false }
         recordUndo("Crear conexión")
         stopPlayback()
         appendConnection(sourceID: sourceID, destinationID: destinationID)
+        if sourceID != nil, activeLesson == nil, nodes.count - unreachableNodeIDs().count >= 2 { onboardingProgress = max(onboardingProgress, 2) }
         let sourceName = sourceID.flatMap { node(id: $0)?.name } ?? "Play"
         let destinationName = node(id: destinationID)?.name ?? "organismo"
         statusMessage = "Conexión creada: \(sourceName) → \(destinationName)."
@@ -210,26 +330,47 @@ final class CompositionState: ObservableObject {
     /// Un hilo une una rama libre a la ruta que ya nace de Play, aunque la
     /// mano empiece por la rama libre. Entre nodos alcanzables se conserva la
     /// dirección del gesto para permitir convergencias y ciclos explícitos.
-    @discardableResult
-    func connectByDragging(from source: ConnectionEndpoint, to target: ConnectionEndpoint) -> Bool {
+    struct ConnectionProposal {
+        let sourceID: UUID?
+        let destinationID: UUID?
+        let isValid: Bool
+        let message: String
+    }
+
+    func connectionProposal(from source: ConnectionEndpoint, to target: ConnectionEndpoint) -> ConnectionProposal {
+        let sourceID: UUID?
+        let destinationID: UUID
         switch (source, target) {
         case (.play, .node(let id)), (.node(let id), .play):
-            guard playEntryNodeID == nil else {
-                statusMessage = "Play ya tiene una entrada. Corta su conexión antes de elegir otra."
-                return false
+            sourceID = nil
+            destinationID = id
+            if playEntryNodeID != nil {
+                return ConnectionProposal(sourceID: nil, destinationID: id, isValid: false,
+                    message: "Play ya tiene una entrada. Corta esa conexión antes de elegir otra.")
             }
-            return connect(sourceID: nil, destinationID: id)
-        case (.node(let sourceID), .node(let targetID)):
+        case (.node(let a), .node(let b)):
             let unreachable = unreachableNodeIDs()
-            let joinsExistingRoute = unreachable.contains(sourceID) && !unreachable.contains(targetID)
-            let didConnect = joinsExistingRoute
-                ? connect(sourceID: targetID, destinationID: sourceID)
-                : connect(sourceID: sourceID, destinationID: targetID)
-            if !didConnect { statusMessage = "Esos organismos ya estaban conectados." }
-            return didConnect
+            let reverse = unreachable.contains(a) && !unreachable.contains(b)
+            sourceID = reverse ? b : a
+            destinationID = reverse ? a : b
         case (.play, .play):
+            return ConnectionProposal(sourceID: nil, destinationID: nil, isValid: false,
+                message: "Elige un organismo como destino.")
+        }
+        let route = "\(sourceID.flatMap { node(id: $0)?.name } ?? "Play") → \(node(id: destinationID)?.name ?? "Destino")"
+        let valid = canConnect(sourceID: sourceID, destinationID: destinationID)
+        return ConnectionProposal(sourceID: sourceID, destinationID: destinationID, isValid: valid,
+            message: valid ? "Soltar para conectar: \(route)" : "Conexión no disponible o duplicada: \(route)")
+    }
+
+    @discardableResult
+    func connectByDragging(from source: ConnectionEndpoint, to target: ConnectionEndpoint) -> Bool {
+        let proposal = connectionProposal(from: source, to: target)
+        guard proposal.isValid, let id = proposal.destinationID else {
+            statusMessage = proposal.message
             return false
         }
+        return connect(sourceID: proposal.sourceID, destinationID: id)
     }
 
     private func canConnect(sourceID: UUID?, destinationID: UUID) -> Bool {
@@ -298,11 +439,12 @@ final class CompositionState: ObservableObject {
         of type: SoundNodeType,
         at position: SIMD3<Float>? = nil
     ) -> UUID {
+        endParameterEdit()
         guard nodes.count < SoundNode.maximumCount else {
             statusMessage = "Límite de 32 sonidos alcanzado. Elimina uno para añadir otro."
             return selectedNodeID ?? nodes.last!.id
         }
-        let finalPosition = clamped(position ?? freeSpawnPosition())
+        let finalPosition = clamped(position ?? SpatialNodePlacement.position(for: type, among: nodes, play: Self.playNodePosition))
         recordUndo("Añadir \(SoundNodeType.displayName(for: type))")
         let name = uniqueName(for: type)
         let node = SoundNode(
@@ -315,6 +457,7 @@ final class CompositionState: ObservableObject {
             positionZ: finalPosition.z
         )
         nodes.append(node)
+        if activeLesson == nil { onboardingProgress = max(onboardingProgress, 1) }
         let startsFromPlay = playEntryNodeID == nil
         if startsFromPlay, canConnect(sourceID: nil, destinationID: node.id) {
             appendConnection(sourceID: nil, destinationID: node.id)
@@ -360,12 +503,14 @@ final class CompositionState: ObservableObject {
             updated.volume = SpatialParameterMapper.volume(forDepth: value.z)
         }
         guard updated != nodes[index] else { return }
+        recordUndo("Mover sonido")
         nodes[index] = updated
         if !updated.isSoundLocked { recalculateConnections(touching: id) }
     }
 
     func toggleSoundLock(id: UUID) {
         guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        recordUndo("Fijar sonido")
         nodes[index].isSoundLocked.toggle()
         statusMessage = nodes[index].isSoundLocked
             ? "\(nodes[index].name): sonido fijo. Muévelo libremente para ordenar."
@@ -374,6 +519,11 @@ final class CompositionState: ObservableObject {
 
     /// La rotación se acumula sobre el valor que el nodo tenía al empezar el
     /// gesto, para que soltar y volver a girar continúe en vez de reiniciar.
+    func rotationEditBegan(id: UUID) {
+        focusNode(id: id)
+        beginParameterEdit("Girar sonido")
+    }
+
     func rotateNode(id: UUID, addingTo origin: SIMD3<Float>, delta: SIMD3<Float>) {
         guard let index = nodes.firstIndex(where: { $0.id == id }) else { return }
         func safeAngle(_ value: Float, fallback: Float) -> Float {
@@ -393,7 +543,10 @@ final class CompositionState: ObservableObject {
         updated.reverb = effects.reverb
         updated.delay = effects.delay
         updated.distortion = effects.distortion
-        if updated != nodes[index] { nodes[index] = updated }
+        if updated != nodes[index] {
+            recordUndo("Girar sonido")
+            nodes[index] = updated
+        }
     }
 
     func togglePlayback() {
@@ -422,6 +575,7 @@ final class CompositionState: ObservableObject {
             nodes: nodes,
             connections: connections,
             bpm: sequencer.bpm,
+            scheduleUsesHostClock: true,
             onSchedule: { [weak self] timeline, secondsPerBeat, loopDurationBeats in
                 guard let self else { return nil }
                 let session = SpatialAudioSession(
@@ -432,7 +586,11 @@ final class CompositionState: ObservableObject {
                     loopDurationBeats: loopDurationBeats
                 )
                 self.spatialAudioSession = session
-                return session.leadInSeconds
+                if let scheduleAudio = self.scheduleAudio {
+                    guard let start = scheduleAudio(session) else { return nil }
+                    return start
+                }
+                return PlaybackClock.seconds(forHostTime: session.startHostTime)
             },
             onVisualTrigger: { [weak self] node in
                 guard self?.node(id: node.id)?.isActive == true else { return }
@@ -441,10 +599,13 @@ final class CompositionState: ObservableObject {
         )
         if didStart {
             if activeLesson != nil { lessonHasPlayed = true }
+            else if onboardingProgress >= 2 { onboardingProgress = 3 }
             statusMessage = "Loop activo desde \(playEntryNode?.name ?? "la entrada"). Pulsa Detener para terminar."
         } else {
             spatialAudioSession = nil
-            statusMessage = "La ruta es demasiado compleja. Reduce las vueltas internas o corta un ciclo antes de reproducir."
+            statusMessage = audioProblem == nil
+                ? "La ruta es demasiado compleja. Reduce las vueltas internas o corta un ciclo antes de reproducir."
+                : "La salida de audio aún no está lista. Vuelve a pulsar Reproducir."
         }
     }
 
@@ -463,7 +624,17 @@ final class CompositionState: ObservableObject {
             leadInSeconds: 0.2
         )
         spatialAudioSession = session
-        triggerVisualPulse(for: node.id, delay: session.leadInSeconds)
+        let effectiveStart: TimeInterval
+        if let scheduleAudio {
+            guard let start = scheduleAudio(session) else {
+                spatialAudioSession = nil
+                statusMessage = "La salida de audio aún no está lista. Vuelve a pulsar Escuchar."
+                return
+            }
+            effectiveStart = start
+        } else { effectiveStart = PlaybackClock.seconds(forHostTime: session.startHostTime) }
+        let visualDelay = max(0, effectiveStart - PlaybackClock.now)
+        triggerVisualPulse(for: node.id, delay: visualDelay)
         statusMessage = "Preview espacial: mueve la cabeza para localizar \(node.name)."
 
         previewClearTask?.cancel()
@@ -471,13 +642,14 @@ final class CompositionState: ObservableObject {
             let held = (session.sustainBeats[node.id] ?? 1.2) * session.secondsPerBeat
             let duration = VoiceSynthesis.duration(for: node.type, sustainSeconds: held)
             let delayTail = node.delay > 0 ? 2 * (0.07 + Double(node.delay) * 0.48) : 0
-            try? await Task.sleep(for: .seconds(session.leadInSeconds + duration + max(0.4, delayTail)))
+            try? await Task.sleep(for: .seconds(visualDelay + duration + max(0.4, delayTail)))
             guard let self, !Task.isCancelled, self.spatialAudioSession?.id == session.id else { return }
             self.spatialAudioSession = nil
         }
     }
 
     func loadSpatialTestScene() {
+        endParameterEdit()
         finishLesson()
         recordUndo("Abrir demo")
         stopPlayback()
@@ -546,6 +718,8 @@ final class CompositionState: ObservableObject {
         }
         do {
             try storage.save(snapshot)
+            flushRecovery()
+            saveStatus = "Composición guardada"
             statusMessage = "Composición espacial guardada."
         } catch {
             statusMessage = "No se pudo guardar: \(error.localizedDescription)"
@@ -553,6 +727,7 @@ final class CompositionState: ObservableObject {
     }
 
     func load() {
+        endParameterEdit()
         do {
             let composition = try storage.load().sanitized()
             finishLesson()
@@ -577,6 +752,7 @@ final class CompositionState: ObservableObject {
     }
 
     func startNewComposition(message: String = "Nueva pista lista. Elige un sonido del cajón para comenzar.") {
+        endParameterEdit()
         finishLesson()
         if !nodes.isEmpty { recordUndo("Vaciar el lienzo") }
         stopPlayback()
@@ -598,6 +774,7 @@ final class CompositionState: ObservableObject {
         pulseClearTasks[nodeID] = Task { @MainActor [weak self] in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             guard !Task.isCancelled else { return }
+            self?.onVisualAttack?(nodeID)
             self?.setSounding(nodeID, isSounding: true)
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
@@ -708,12 +885,10 @@ final class CompositionState: ObservableObject {
 
     func setPitch(id: UUID, semitones: Float) {
         guard semitones.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
+        guard nodes[index].pitch != max(-24, min(semitones.rounded(), 24)) else { return }
         recordUndo("Afinar sonido")
         nodes[index].pitch = max(-24, min(semitones.rounded(), 24))
     }
-
-    /// Un solo punto de deshacer por arrastre de slider, no uno por muestra.
-    func beginParameterEdit() { recordUndo("Ajustar sonido") }
 
     func setSoundParameter(id: UUID, parameter: SoundParameter, value: Float) {
         guard value.isFinite, let index = nodes.firstIndex(where: { $0.id == id }) else { return }
@@ -731,12 +906,16 @@ final class CompositionState: ObservableObject {
             updated.distortion = amount
             updated.rotationZ = amount * .pi
         }
-        if updated != nodes[index] { nodes[index] = updated }
+        if updated != nodes[index] {
+            recordUndo("Ajustar \(parameter.title)")
+            nodes[index] = updated
+        }
     }
 
     func beginLesson(_ lesson: MusicLesson) {
+        endParameterEdit()
         if learningBackup == nil {
-            learningBackup = (snapshot, selectedNodeID, undoStack, isSpatialTestScene)
+            learningBackup = (editSnapshot, history)
         }
         stopPlayback()
         let practice = lesson.composition()
@@ -746,61 +925,31 @@ final class CompositionState: ObservableObject {
         graphTransport.loopPasses = practice.loopPasses
         selectedNodeID = nodes.first?.id
         isSpatialTestScene = false
-        undoStack = []
-        undoLabel = nil
+        history = CompositionHistory()
+        refreshHistoryLabels()
         activeLesson = lesson
         lessonHasPlayed = false
         sceneContentRevision &+= 1
         statusMessage = "Práctica lista. Tu composición está reservada hasta que termines."
+        flushRecovery()
     }
 
     func finishLesson() {
         guard let backup = learningBackup else { return }
         stopPlayback()
-        nodes = backup.composition.nodes
-        connections = backup.composition.connections
-        sequencer.bpm = backup.composition.bpm
-        graphTransport.loopPasses = backup.composition.loopPasses
-        selectedNodeID = backup.selectedID
-        isSpatialTestScene = backup.isDemo
-        undoStack = backup.undo
-        undoLabel = undoStack.last?.label
+        apply(backup.snapshot)
+        history = backup.history
+        refreshHistoryLabels()
         learningBackup = nil
         activeLesson = nil
         lessonHasPlayed = false
         sceneContentRevision &+= 1
         statusMessage = "De vuelta en tu composición."
+        flushRecovery()
     }
 
     private func position(of nodeID: UUID) -> SIMD3<Float>? {
         nodes.first(where: { $0.id == nodeID }).map { [$0.positionX, $0.positionY, $0.positionZ] }
-    }
-
-    /// Busca el hueco más despejado en un anillo alrededor del núcleo. La
-    /// versión anterior derivaba la posición de `nodes.count`, así que tras
-    /// borrar un nodo los siguientes reaparecían encima de los que quedaban.
-    private func freeSpawnPosition() -> SIMD3<Float> {
-        let radius: Float = 0.95
-        let heights: [Float] = [0.24, 0, -0.22]
-        var best = SIMD3<Float>(0, SpatialParameterMapper.neutralHeight, radius * 0.6)
-        var bestClearance = -Float.infinity
-
-        for step in 0..<18 {
-            let angle = Float(step) / 18 * 2 * .pi
-            let candidate = SIMD3<Float>(
-                sin(angle) * radius,
-                SpatialParameterMapper.neutralHeight + heights[step % heights.count],
-                cos(angle) * radius * 0.6
-            )
-            let clearance = nodes
-                .map { simd_distance(candidate, [$0.positionX, $0.positionY, $0.positionZ]) }
-                .min() ?? .greatestFiniteMagnitude
-            if clearance > bestClearance {
-                bestClearance = clearance
-                best = candidate
-            }
-        }
-        return best
     }
 
     /// Mismos límites que aplica `moveNode`, expuestos para que un arrastre

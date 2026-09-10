@@ -3,7 +3,7 @@ import SwiftUI
 
 @main
 struct SoundVisionApp: App {
-    @StateObject private var compositionState = CompositionState()
+    @StateObject private var compositionState = CompositionState(enableRecovery: true)
 
     init() {
         // Los sistemas animan la escultura a la tasa de refresco de RealityKit.

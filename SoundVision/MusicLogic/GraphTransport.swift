@@ -10,12 +10,14 @@ final class GraphTransport: ObservableObject {
     @Published var loopPasses = 2
 
     private var visualTask: Task<Void, Never>?
+    private(set) var effectiveStartSeconds: TimeInterval?
 
     @discardableResult
     func start(
         nodes: [SoundNode],
         connections: [SoundConnection],
         bpm: Double,
+        scheduleUsesHostClock: Bool = false,
         onSchedule: ([GraphPlaybackEvent], Double, Double) -> TimeInterval?,
         onVisualTrigger: @escaping (SoundNode) -> Void
     ) -> Bool {
@@ -34,7 +36,9 @@ final class GraphTransport: ObservableObject {
         // el proceso en el acto, y una composición cargada con dos nodos del
         // mismo id convertía Play en un cierre inesperado.
         let nodesByID = Dictionary(nodes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        guard let visualLeadIn = onSchedule(timeline, secondsPerBeat, loopDurationBeats) else { return false }
+        guard let scheduledStart = onSchedule(timeline, secondsPerBeat, loopDurationBeats) else { return false }
+        let start = scheduleUsesHostClock ? scheduledStart : PlaybackClock.now + scheduledStart
+        effectiveStartSeconds = start
         isPlaying = true
 
         // Una sola tarea recorre la línea de tiempo en orden. Antes se creaba
@@ -42,8 +46,6 @@ final class GraphTransport: ObservableObject {
         // por el hilo principal justo mientras sonaba la música.
         let ordered = timeline.sorted { $0.beat < $1.beat }
         visualTask = Task { @MainActor [weak self] in
-            let clock = ContinuousClock()
-            let origin = clock.now
             var loopOffsetBeats = 0.0
 
             // El grafo es un patrón, no una reproducción de una sola toma. La
@@ -55,10 +57,9 @@ final class GraphTransport: ObservableObject {
                     // Cada espera se mide contra el origen, no contra la anterior:
                     // así ni las ramas simultáneas ni las vueltas largas acumulan
                     // el retraso de los eventos anteriores.
-                    let target = origin.advanced(by: .seconds(
-                        visualLeadIn + (loopOffsetBeats + event.beat) * secondsPerBeat
-                    ))
-                    try? await clock.sleep(until: target)
+                    let target = start + (loopOffsetBeats + event.beat) * secondsPerBeat
+                    let delay = max(0, target - PlaybackClock.now)
+                    try? await Task.sleep(for: .seconds(delay))
                     guard self.isPlaying, !Task.isCancelled else { return }
                     onVisualTrigger(node)
                 }
@@ -72,6 +73,7 @@ final class GraphTransport: ObservableObject {
         visualTask?.cancel()
         visualTask = nil
         isPlaying = false
+        effectiveStartSeconds = nil
     }
 
     nonisolated static func makeSchedule(

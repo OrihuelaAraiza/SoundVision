@@ -2,7 +2,7 @@ import Foundation
 
 /// Ejercicios pequeños y reproducibles. Se comprueba la música resultante,
 /// no una lista de botones pulsados.
-enum MusicLesson: String, CaseIterable, Identifiable {
+enum MusicLesson: String, CaseIterable, Identifiable, Codable {
     case pulse, melody, harmony, branches
     var id: String { rawValue }
     var title: String {
@@ -82,33 +82,54 @@ enum MusicLesson: String, CaseIterable, Identifiable {
             }, loopPasses: 1)
     }
 
-    func isComplete(_ composition: Composition) -> Bool {
+    func isComplete(_ composition: Composition) -> Bool { feedback(for: composition).isEmpty }
+
+    struct Feedback: Equatable, Identifiable {
+        let nodeID: UUID?
+        let message: String
+        var id: String { message }
+    }
+
+    func feedback(for composition: Composition) -> [Feedback] {
         let plan = GraphSchedule.makePlan(nodes: composition.nodes, connections: composition.connections,
                                          loopPasses: composition.loopPasses)
-        guard !plan.isTruncated else { return false }
-        func attacks(_ name: String) -> [Double] {
-            guard let node = composition.nodes.first(where: { $0.name == name && $0.isActive }) else { return [] }
-            return plan.events.filter { $0.nodeID == node.id }.map(\.beat)
+        guard !plan.isTruncated else {
+            return [Feedback(nodeID: nil, message: "Reduce los ciclos internos: el recorrido supera el límite de ataques.")]
         }
-        func matches(_ actual: [Double], _ expected: [Double]) -> Bool {
-            actual.count == expected.count && zip(actual, expected).allSatisfy { abs($0 - $1) < 0.001 }
-        }
-        func pitched(_ name: String, _ pitch: Float, _ type: SoundNodeType) -> Bool {
-            composition.nodes.contains { $0.name == name && $0.type == type && abs($0.pitch - pitch) < 0.01 && $0.isActive }
-        }
+        let expected: [(String, [Double], Float?, SoundNodeType?)]
         switch self {
-        case .pulse:
-            return (0..<4).allSatisfy { matches(attacks("Pulso \($0 + 1)"), [Double($0)]) }
-        case .melody:
-            return pitched("La", 0, .marimba) && pitched("Do", 3, .marimba) && pitched("Mi", 7, .marimba)
-                && matches(attacks("La"), [0]) && matches(attacks("Do"), [1]) && matches(attacks("Mi"), [2])
-        case .harmony:
-            return pitched("La", 0, .organ) && pitched("Do", 3, .organ) && pitched("Mi", 7, .organ)
-                && ["La", "Do", "Mi"].allSatisfy { matches(attacks($0), [1]) }
-        case .branches:
-            guard let bell = composition.nodes.first(where: { $0.name == "Campana" }) else { return false }
-            return composition.connections.filter { $0.destinationNodeID == bell.id && $0.sourceNodeID != nil }.count == 2
-                && matches(attacks("Campana"), [2, 3])
+        case .pulse: expected = (0..<4).map { ("Pulso \($0 + 1)", [Double($0)], nil, nil) }
+        case .melody: expected = [("La", [0], 0, .marimba), ("Do", [1], 3, .marimba), ("Mi", [2], 7, .marimba)]
+        case .harmony: expected = [("La", [1], 0, .organ), ("Do", [1], 3, .organ), ("Mi", [1], 7, .organ)]
+        case .branches: expected = [("Campana", [2, 3], nil, nil)]
         }
+        func beats(_ values: [Double]) -> String { values.map { String(format: "%g", $0) }.joined(separator: ", ") }
+        var result: [Feedback] = []
+        for (name, times, pitch, type) in expected {
+            guard let node = composition.nodes.first(where: { $0.name == name }) else {
+                result.append(Feedback(nodeID: nil, message: "Falta «\(name)». Reinicia la práctica para recuperarlo."))
+                continue
+            }
+            if !node.isActive || node.volume == 0 {
+                result.append(Feedback(nodeID: node.id, message: "Activa «\(name)» y sube su volumen para escucharlo."))
+            }
+            if let pitch, abs(node.pitch - pitch) >= 0.01 {
+                result.append(Feedback(nodeID: node.id,
+                    message: "«\(name)»: ajusta Afinación a \(String(format: "%g", pitch)) semitonos; ahora está en \(String(format: "%g", node.pitch))."))
+            }
+            if let type, node.type != type {
+                result.append(Feedback(nodeID: node.id, message: "«\(name)» debe usar \(SoundNodeType.displayName(for: type)). Reinicia la práctica para restaurarlo."))
+            }
+            let actual = plan.events.filter { $0.nodeID == node.id }.map(\.beat)
+            if actual.count != times.count || !zip(actual, times).allSatisfy({ abs($0 - $1) < 0.001 }) {
+                let current = actual.isEmpty ? "no tiene ruta desde Play" : "entra en \(beats(actual))"
+                result.append(Feedback(nodeID: node.id,
+                    message: "«\(name)» debe entrar en los beats \(beats(times)); ahora \(current). Ajusta los tiempos de sus conexiones de entrada."))
+            }
+            if self == .branches, composition.connections.filter({ $0.destinationNodeID == node.id && $0.sourceNodeID != nil }).count != 2 {
+                result.append(Feedback(nodeID: node.id, message: "«Campana» necesita dos conexiones de entrada: una desde Rama A y otra desde Rama B."))
+            }
+        }
+        return result
     }
 }
